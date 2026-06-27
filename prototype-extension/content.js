@@ -534,10 +534,12 @@
   // --- Duplicate rolls: which copy to keep ----------------------------------
   // Does this copy have any of the recommended perks in each column?
   function matchInfo(instanceId, rec) {
-    // Map of lowercased perk name -> the copy's actual display name, so we can both
-    // test membership and report which recommended perk this copy actually has.
-    const have = new Map(perkNames(instanceId).map((n) => [n.toLowerCase(), n]));
-    const hit = (arr) => (Array.isArray(arr) ? arr.map((p) => have.get(p.toLowerCase())).find(Boolean) || null : null);
+    // Map of perkKey -> the copy's actual display name, so we can both test membership
+    // and report which recommended perk this copy actually has. Keying by perkKey (not
+    // a plain lowercase) means Enhanced variants count too, matching the glow logic — an
+    // "Enhanced Chill Clip" roll now scores the same as the recommended "Chill Clip".
+    const have = new Map(perkNames(instanceId).map((n) => [perkKey(n), n]));
+    const hit = (arr) => (Array.isArray(arr) ? arr.map((p) => have.get(perkKey(p))).find(Boolean) || null : null);
     const n1 = hit(rec.perk1), n2 = hit(rec.perk2), nb = hit(rec.barrel), nm = hit(rec.mag);
     return { p1: !!n1, p2: !!n2, barrel: !!nb, mag: !!nm, names: { p1: n1, p2: n2, barrel: nb, mag: nm } };
   }
