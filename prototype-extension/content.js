@@ -28,6 +28,7 @@
   const BADGE_ATTR = "data-va-badge";
   const SHARD_ATTR = "data-va-shard";
   const STATE_LOCKED = 1; // Bungie item.state bitflag
+  const BUILD = "dup-v2"; // bump to confirm a fresh load in the popup diagnostic line
 
   // Names we don't count as "perks" (shown in the tooltip, not used for the tier).
   const PERK_NAME_BLOCKLIST = [/shader/i, /empty .*socket/i, /masterwork/i, /^default ornament$/i, /tracker/i, /memento/i];
@@ -421,18 +422,21 @@
     keepers = new Set();
     if (!vault.ready || !Object.keys(tierMap).length) return;
 
-    const groups = new Map(); // itemHash -> [{ id, item }]
+    // Group by weapon NAME, not itemHash — reissued/differently-sourced copies of the
+    // same weapon have different hashes but are duplicates for keep-vs-shard purposes.
+    const groups = new Map(); // normalized name -> { name, copies: [{ id, item }] }
     for (const [id, item] of vault.byInstance) {
-      if (!vault.defs.get(item.itemHash)) continue;
-      if (!groups.has(item.itemHash)) groups.set(item.itemHash, []);
-      groups.get(item.itemHash).push({ id, item });
+      const def = vault.defs.get(item.itemHash);
+      const name = def?.displayProperties?.name;
+      if (!name) continue;
+      if (excludeExotics && isExotic(def)) continue;
+      const key = normalizeName(name);
+      if (!groups.has(key)) groups.set(key, { name, copies: [] });
+      groups.get(key).copies.push({ id, item });
     }
 
-    for (const [hash, copies] of groups) {
+    for (const { name, copies } of groups.values()) {
       if (copies.length < 2) continue;
-      const def = vault.defs.get(hash);
-      if (excludeExotics && isExotic(def)) continue;
-      const name = def.displayProperties?.name || "";
       const rec = lookupTier(name).perks;
       if (!rec) continue; // need recommended perks to judge
 
@@ -517,6 +521,31 @@
     if ("excludeExotics" in msg) setExclude(msg.excludeExotics); // sync with popup
 
     if (msg.type === "tierCounts") {
+      let dupGroups = 0;
+      let probe = "";
+      if (vault.ready) {
+        const counts = new Map();
+        const mintCopies = [];
+        for (const [id, item] of vault.byInstance) {
+          const nm = vault.defs.get(item.itemHash)?.displayProperties?.name;
+          if (!nm) continue;
+          const k = normalizeName(nm);
+          counts.set(k, (counts.get(k) || 0) + 1);
+          if (k === "mint retrograde") mintCopies.push({ id, hash: item.itemHash });
+        }
+        for (const n of counts.values()) if (n >= 2) dupGroups++;
+        const rec = lookupTier("Mint Retrograde").perks;
+        const hashes = new Set(mintCopies.map((c) => c.hash));
+        let bestPerk = 0;
+        for (const c of mintCopies) {
+          if (!rec) break;
+          const mm = matchInfo(c.id, rec);
+          bestPerk = Math.max(bestPerk, (mm.p1 ? 1 : 0) + (mm.p2 ? 1 : 0));
+        }
+        const roll = mintCopies[0] ? perkNames(mintCopies[0].id) : [];
+        probe = `mint ${mintCopies.length}c/${hashes.size}h rec1:${rec?.perk1?.length ?? 0} roll:${roll.length} bestPerk:${bestPerk}`;
+        console.log(TAG, "MINT PROBE", { copies: mintCopies.length, hashes: [...hashes], rec, roll0: roll, bestPerk });
+      }
       respond({
         ok: vault.ready,
         ready: vault.ready,
@@ -525,6 +554,15 @@
         redundant: redundant.size,
         highlightOn,
         excludeExotics,
+        debug: {
+          build: BUILD,
+          instances: vault.byInstance.size,
+          tiers: Object.keys(tierMap).length,
+          dupGroups,
+          keepers: keepers.size,
+          mintKnown: lookupTier("Mint Retrograde").known,
+          probe,
+        },
       });
       return;
     }

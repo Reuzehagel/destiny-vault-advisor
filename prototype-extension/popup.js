@@ -77,6 +77,11 @@ function applyCounts(resp) {
     ? `On tier list: ${cov.matched}/${cov.ownedWeapons} owned weapons` +
       (unmatched.length ? ` · click to copy ${unmatched.length} unmatched` : "")
     : "";
+  const d = resp?.debug;
+  $("debug").textContent = d
+    ? `build ${d.build} · ${d.instances} items · ${d.tiers} tiered · ${d.dupGroups} dup groups · keep ${d.keepers} · mint:${d.mintKnown ? "yes" : "no"}\n${d.probe || ""}`
+    : "";
+  $("debug").style.whiteSpace = "pre-wrap";
   if (resp && !resp.ready) status("Vault still loading in DIM…");
 }
 
