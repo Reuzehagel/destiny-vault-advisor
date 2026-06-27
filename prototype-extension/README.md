@@ -16,8 +16,9 @@ fetched live and cached. Edit-free: when the sheet updates, badges follow.
 
 **Tier is weapon-bound** (it's a property of the weapon, not your roll) and
 **relative within each weapon category** — an S-tier sniper isn't an S-tier glaive.
-The badge tooltip names the category so that's clear. Your actual roll's perks are
-shown too, as context for a future "is this a god roll?" check.
+The badge tooltip names the category and shows the sheet's notes plus the keep/shard
+verdict. The recommended perks themselves are highlighted directly on DIM's perk
+circles (see below), so the tooltip stays about the notes.
 
 ## Load it
 
@@ -46,6 +47,24 @@ Because it's built from weapons you actually own, the query stays short. DIM has
 native "tier" concept, so matching is by weapon name. **Exclude exotics** (top of the
 popup) drops exotics from the counts, tier search, and redundancy.
 
+## Recommended perks — the ideal roll, in place
+
+When you open a weapon, the perks the sheet recommends **glow gold on DIM's own perk
+circles** — in the compact perk list, the expanded socket grid, and the full Armory
+view (the screen showing every available perk). This marks the ideal roll right where
+you read perks, instead of in a tooltip.
+
+- **Perk 1 / Perk 2** (the god-roll perks) glow **bright**; **barrel / mag** glow a
+  touch softer, so the priority is readable at a glance.
+- It highlights **every** recommended option, including ones you haven't rolled — so an
+  unrolled god-roll perk still lights up as "worth chasing".
+
+How it matches: DIM's perk circles carry only an icon in the DOM (the name is
+hover-only), so on load the extension indexes every plug in the manifest by
+`icon → name` and matches the sheet's recommended **names** to on-screen circles via
+that icon. The glow is applied via a `data-` attribute (not a class) because DIM owns
+`className` on those SVGs and rewrites it on every re-render.
+
 ## Duplicates — keep vs shard
 
 When you own multiple copies of the same weapon, the extension ranks them against the
@@ -54,9 +73,9 @@ When you own multiple copies of the same weapon, the extension ranks them agains
 - **Ranking:** recommended Perk 1 + Perk 2 matches dominate, then barrel/mag, then
   masterwork as a tiebreak. The top copy is the **keeper**; the rest are shard candidates.
 - **On tiles:** the keeper gets a **green** outline, shard candidates get **red**.
-- **In the popup badge:** a green ring (keep) or red ring (shard), with a tooltip showing
-  the recommended perks ("Want: …"), your roll, and "✓ Keep" / "⚠ Shard — you own a
-  better copy".
+- **In the popup badge:** a green ring (keep) or red ring (shard), with a tooltip reading
+  "✓ Keep — best of your copies" / "⚠ Shard — you own a better copy" (the recommended
+  perks are shown as glows on the perk circles, not in the tooltip).
 
 Popup controls (independent of the tier checkboxes):
 
@@ -81,7 +100,8 @@ the sheet) can be spotted and fixed.
 
 ## Known prototype limitations
 
-- Identifies the popup's item by the **last clicked `.item` tile** (covers the normal flow).
-- The `Other` tab parses to 0 rows (different layout) — not yet handled.
+- The badge identifies the popup's item by the **last clicked `.item` tile** (covers the
+  normal flow). Perk highlighting instead keys off the weapon **name in the title**, so it
+  also works in the Armory view where there's no clicked instance.
 - First load fetches ~21 tabs; afterward it's served from cache.
 - Loose matching can in rare cases collide two differently-named weapons.

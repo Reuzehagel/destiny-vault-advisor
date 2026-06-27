@@ -28,7 +28,8 @@
   const BADGE_ATTR = "data-va-badge";
   const SHARD_ATTR = "data-va-shard";
   const STATE_LOCKED = 1; // Bungie item.state bitflag
-  const BUILD = "dup-v4"; // bump to confirm a fresh load in the popup diagnostic line
+  const STATE_MASTERWORK = 4; // Bungie item.state bitflag
+  const BUILD = "perks-v4"; // bump to confirm a fresh load in the popup diagnostic line
 
   // Names we don't count as "perks" (shown in the tooltip, not used for the tier).
   const PERK_NAME_BLOCKLIST = [/shader/i, /empty .*socket/i, /masterwork/i, /^default ornament$/i, /tracker/i, /memento/i];
@@ -102,6 +103,20 @@
     defs: new Map(),
     /** instanceId -> [plugHash, ...] (visible, enabled sockets) */
     socketsByInstance: new Map(),
+    /** icon basename -> perk name (perkKey'd) — to match DIM's icon-only plug circles */
+    perkNameByIcon: new Map(),
+  };
+
+  // Loose key for matching perk names across the sheet and the manifest. Lowercases
+  // and drops the "Enhanced" qualifier so an enhanced perk circle still matches the
+  // sheet's base-name recommendation.
+  const perkKey = (s) =>
+    (s || "").toLowerCase().replace(/\benhanced\b/g, " ").replace(/\s+/g, " ").trim();
+
+  // The trailing filename of an icon path/URL (e.g. ".../icons/abc123.jpg" -> "abc123.jpg").
+  const iconBase = (s) => {
+    const path = (s || "").split("?")[0];
+    return path.slice(path.lastIndexOf("/") + 1);
   };
 
   let lastClickedInstanceId = null;
@@ -172,6 +187,18 @@
       const def = bigTable[h] ?? bigTable[String(h)];
       if (def) vault.defs.set(h, def);
     }
+
+    // Index every plug's icon -> name while the big table is in memory. DIM's perk
+    // circles render only the icon (the name is hover-only), so we match the sheet's
+    // recommended perk *names* to on-screen circles via the icon filename.
+    for (const key in bigTable) {
+      const def = bigTable[key];
+      if (!def || !def.plug) continue; // only pluggable items (perks/mods)
+      const nm = def.displayProperties?.name;
+      const ic = def.displayProperties?.icon;
+      if (!nm || !ic) continue;
+      vault.perkNameByIcon.set(iconBase(ic), perkKey(nm));
+    }
     db.close();
 
     vault.ready = true;
@@ -188,19 +215,12 @@
       .filter((n) => !PERK_NAME_BLOCKLIST.some((re) => re.test(n)));
   }
 
-  // The sheet's recommended perks for a weapon, flattened to a display string.
-  function recommendedPerks(t) {
-    if (!t.perks) return "";
-    const cols = [t.perks.perk1, t.perks.perk2].filter((c) => c && c.length);
-    return cols.map((c) => c.join("/")).join(" + ");
-  }
-
-  // Assemble what the badge shows: weapon-bound tier + recommended/your perks + dupe note.
+  // Assemble what the badge shows: weapon-bound tier + notes + dupe verdict. The
+  // recommended/your perks are no longer listed here — they're highlighted directly
+  // on DIM's perk circles (see highlightPerks), so the tooltip stays about notes.
   function tierFor(item, def) {
     const name = def.displayProperties?.name || "";
     const t = lookupTier(name);
-    const perks = perkNames(item.itemInstanceId);
-    const rec = recommendedPerks(t);
     const dupe = redundant.get(item.itemInstanceId);
     const keep = keepers.has(item.itemInstanceId);
     return {
@@ -215,12 +235,59 @@
             : `${name} — listed (no tier rating)${t.category ? ` (${t.category})` : ""}`
           : `${name} — not in the tier list`,
         t.notes || "",
-        rec ? `Want: ${rec}` : "",
-        perks.length ? `Your roll: ${perks.join(", ")}` : "",
         keep ? "✓ Keep — best of your copies" : "",
         dupe ? `⚠ Shard — you own a better copy (${dupe.count} total)${dupe.locked ? " · unlock first" : ""}` : "",
       ].filter(Boolean),
     };
+  }
+
+  // --- Recommended-perk highlighting ----------------------------------------
+  // The sheet recommends perks by name, in columns. perk1/perk2 are the meaningful
+  // "god roll" perks (highlighted strongly); barrel/mag are secondary (subtler).
+  const PERK_MARK = "data-va-perk";
+  function recommendedNameTiers(t) {
+    const m = new Map(); // perkKey -> "primary" | "secondary"
+    if (!t.perks) return m;
+    const add = (col, kind) => {
+      for (const n of col || []) {
+        const k = perkKey(n);
+        if (k && !m.has(k)) m.set(k, kind);
+      }
+    };
+    add(t.perks.perk1, "primary");
+    add(t.perks.perk2, "primary");
+    add(t.perks.barrel, "secondary");
+    add(t.perks.mag, "secondary");
+    return m;
+  }
+
+  // Glow the recommended perk circles inside one container (the item popup OR the
+  // full Armory perk grid). We key off the weapon NAME in the container's title, not
+  // a clicked instance — the Armory shows a weapon's whole perk pool, no instance —
+  // and match the sheet's recommended names to DIM's icon-only circles via the icon.
+  function highlightPerksIn(container) {
+    const name = container.querySelector("h1")?.textContent?.trim();
+    if (!name) return;
+    const tiers = recommendedNameTiers(lookupTier(name));
+    if (!tiers.size) return;
+
+    for (const img of container.querySelectorAll("svg image")) {
+      const href = img.getAttribute("href") || img.getAttribute("xlink:href") || "";
+      if (!href) continue;
+      const perk = vault.perkNameByIcon.get(iconBase(href));
+      if (!perk) continue;
+      const kind = tiers.get(perk);
+      if (!kind) continue;
+      const svg = img.closest("svg") || img;
+      if (svg.getAttribute(PERK_MARK) === kind) continue;
+      svg.setAttribute(PERK_MARK, kind);
+    }
+  }
+
+  // Highlight everywhere a weapon's perks are shown: the item popup and the Armory.
+  function highlightPerks() {
+    if (!vault.perkNameByIcon.size || !Object.keys(tierMap).length) return;
+    for (const c of document.querySelectorAll(".item-popup, .armory")) highlightPerksIn(c);
   }
 
   // --- Badge injection ------------------------------------------------------
@@ -272,6 +339,19 @@
         to { opacity: 1; transform: scale(1); }
       }
       .item[${SHARD_ATTR}] { transition: outline-color 0.12s ease; }
+      /* Recommended perks, glowed right on DIM's own perk circles. Styled via a
+         data-attribute, NOT a class: DIM owns these svgs' className (clsx) and
+         overwrites it on every React re-render, so a class would get wiped on the
+         grid. A data-attribute we set survives re-renders. The drop-shadow hugs the
+         circle shape; gold = god-roll perk, dimmer = barrel/mag. */
+      svg[${PERK_MARK}="primary"] {
+        filter: drop-shadow(0 0 3px #e8a534) drop-shadow(0 0 7px #e8a534);
+        transition: filter 0.12s ease;
+      }
+      svg[${PERK_MARK}="secondary"] {
+        filter: drop-shadow(0 0 2px #e8a534) drop-shadow(0 0 4px #e8a534);
+        transition: filter 0.12s ease;
+      }
     `;
     document.head.appendChild(s);
   }
@@ -316,6 +396,7 @@
   function scanForPopup() {
     if (!vault.ready) return;
     for (const popup of document.querySelectorAll(".item-popup")) injectInto(popup);
+    highlightPerks(); // popup + Armory, keyed off the weapon name in each title
   }
 
   // Pull the live tier list from the background worker (which fetches the sheet).
@@ -535,31 +616,6 @@
     }
 
     if (msg.type === "tierCounts") {
-      let dupGroups = 0;
-      let probe = "";
-      if (vault.ready) {
-        const counts = new Map();
-        const mintCopies = [];
-        for (const [id, item] of vault.byInstance) {
-          const nm = vault.defs.get(item.itemHash)?.displayProperties?.name;
-          if (!nm) continue;
-          const k = normalizeName(nm);
-          counts.set(k, (counts.get(k) || 0) + 1);
-          if (k === "mint retrograde") mintCopies.push({ id, hash: item.itemHash });
-        }
-        for (const n of counts.values()) if (n >= 2) dupGroups++;
-        const rec = lookupTier("Mint Retrograde").perks;
-        const hashes = new Set(mintCopies.map((c) => c.hash));
-        let bestPerk = 0;
-        for (const c of mintCopies) {
-          if (!rec) break;
-          const mm = matchInfo(c.id, rec);
-          bestPerk = Math.max(bestPerk, (mm.p1 ? 1 : 0) + (mm.p2 ? 1 : 0));
-        }
-        const roll = mintCopies[0] ? perkNames(mintCopies[0].id) : [];
-        probe = `mint ${mintCopies.length}c/${hashes.size}h rec1:${rec?.perk1?.length ?? 0} roll:${roll.length} bestPerk:${bestPerk}`;
-        console.log(TAG, "MINT PROBE", { copies: mintCopies.length, hashes: [...hashes], rec, roll0: roll, bestPerk });
-      }
       respond({
         ok: vault.ready,
         ready: vault.ready,
@@ -568,16 +624,6 @@
         redundant: redundant.size,
         highlightOn,
         excludeExotics,
-        debug: {
-          build: BUILD,
-          instances: vault.byInstance.size,
-          tiers: Object.keys(tierMap).length,
-          dupGroups,
-          keepers: keepers.size,
-          mintKnown: lookupTier("Mint Retrograde").known,
-          probe,
-          err: computeError,
-        },
       });
       return;
     }
@@ -641,7 +687,7 @@
         console.warn(TAG, e.message || e);
       });
 
-    console.log(TAG, "active — click a weapon in DIM.");
+    console.log(TAG, `active (${BUILD}) — click a weapon in DIM.`);
   }
 
   if (document.readyState === "loading") {
