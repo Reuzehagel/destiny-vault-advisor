@@ -64,10 +64,20 @@ It's its own section in the popup (independent of the tier checkboxes):
 Locked copies are never flagged, and **Exclude exotics** removes exotics here too. If no copy has any recommended perk, nothing in
 that group is flagged (there's no clear "better" copy to keep).
 
+## Name matching & coverage
+
+Sheet names and in-game names are matched after **normalization** (accent strip,
+curly→straight apostrophes, lowercase, collapsed whitespace), with an
+alphanumeric-only **loose fallback** when the exact key misses. The same
+`normalizeName()` lives in both `background.js` and `content.js` and must stay in sync.
+
+The popup shows a coverage line — `On tier list: 142/150 owned weapons` — and clicking
+it copies the **unmatched** names so real mismatches (vs. weapons genuinely absent from
+the sheet) can be spotted and fixed.
+
 ## Known prototype limitations
 
-- Matches sheet ↔ in-game by **exact (case-insensitive) name**. A few weapons with
-  punctuation/reissue differences may miss until name-normalization is added.
-- Identifies the item by the **last clicked `.item` tile** (covers the normal flow).
+- Identifies the popup's item by the **last clicked `.item` tile** (covers the normal flow).
 - The `Other` tab parses to 0 rows (different layout) — not yet handled.
 - First load fetches ~21 tabs; afterward it's served from cache.
+- Loose matching can in rare cases collide two differently-named weapons.

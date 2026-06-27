@@ -21,6 +21,19 @@ const TTL_MS = 12 * 60 * 60 * 1000; // refetch at most twice a day
 const tabUrl = (tab) =>
   `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
 
+// Canonical key for matching sheet names against in-game names. MUST stay identical
+// to normalizeName() in content.js. Strips accents, unifies apostrophes, lowercases,
+// collapses whitespace.
+function normalizeName(s) {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[’‘`´]/g, "'")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 // RFC-4180-ish CSV parser: handles quoted fields with embedded commas/newlines.
 function parseCSV(text) {
   const rows = [];
@@ -88,7 +101,7 @@ async function fetchAll() {
         if (!res.ok) throw new Error("HTTP " + res.status);
         const entries = buildFromTab(tab, await res.text());
         perTab[tab] = entries.length;
-        for (const e of entries) map[e.name.toLowerCase()] = e; // last wins on dup names
+        for (const e of entries) map[normalizeName(e.name)] = e; // last wins on dup names
       } catch (e) {
         perTab[tab] = "ERR " + (e && e.message ? e.message : e);
       }

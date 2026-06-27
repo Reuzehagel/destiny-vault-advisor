@@ -65,11 +65,30 @@ async function run(apply) {
   }
 }
 
+let unmatched = [];
+
 function applyCounts(resp) {
   renderTiers(resp?.counts || {});
   $("redundant-count").textContent = resp?.redundant ?? 0;
   $("redundant").checked = Boolean(resp?.highlightOn);
+  const cov = resp?.coverage;
+  unmatched = cov?.unmatched || [];
+  $("coverage").textContent = cov
+    ? `On tier list: ${cov.matched}/${cov.ownedWeapons} owned weapons` +
+      (unmatched.length ? ` · click to copy ${unmatched.length} unmatched` : "")
+    : "";
   if (resp && !resp.ready) status("Vault still loading in DIM…");
+}
+
+async function copyUnmatched() {
+  if (!unmatched.length) return;
+  try {
+    await navigator.clipboard.writeText(unmatched.join("\n"));
+    status(`Copied ${unmatched.length} unmatched names.`);
+  } catch {
+    console.log(unmatched.join("\n"));
+    status("Unmatched names in console.");
+  }
 }
 
 async function toggleRedundant() {
@@ -125,4 +144,5 @@ $("exclude").addEventListener("change", refresh);
 $("redundant").addEventListener("change", toggleRedundant);
 $("redundant-apply").addEventListener("click", () => runRedundant(true));
 $("redundant-copy").addEventListener("click", () => runRedundant(false));
+$("coverage").addEventListener("click", copyUnmatched);
 init();

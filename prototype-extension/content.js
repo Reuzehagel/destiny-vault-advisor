@@ -37,15 +37,36 @@
   // (see background.js) and cached. Tier is WEAPON-BOUND (keyed by weapon name)
   // and RELATIVE WITHIN each weapon category.
   // ---------------------------------------------------------------------------
-  let tierMap = {}; // lowercased name -> { tier, rank, notes, category, perks }
+  let tierMap = {}; // normalized name -> entry
+  let tierLoose = {}; // alphanumeric-only name -> entry (fallback when exact misses)
   const TIER_COLOR = {
     S: "#f5b942", A: "#3fb950", B: "#58a6ff", C: "#d2a8ff",
     D: "#d29922", E: "#db6d28", F: "#f85149",
   };
   const UNKNOWN_COLOR = "#6e7681";
 
+  // MUST stay identical to normalizeName() in background.js.
+  function normalizeName(s) {
+    return (s || "")
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[’‘`´]/g, "'")
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+  const looseName = (s) => normalizeName(s).replace(/[^a-z0-9]/g, "");
+
+  function rebuildLooseIndex() {
+    tierLoose = {};
+    for (const e of Object.values(tierMap)) {
+      const k = looseName(e.name);
+      if (k && !(k in tierLoose)) tierLoose[k] = e;
+    }
+  }
+
   function lookupTier(name) {
-    const hit = tierMap[(name || "").trim().toLowerCase()];
+    const hit = tierMap[normalizeName(name)] || tierLoose[looseName(name)];
     if (!hit) return { grade: "–", color: UNKNOWN_COLOR, known: false, notes: "Not in the tier list." };
     return {
       grade: hit.tier,
@@ -259,6 +280,7 @@
         }
         if (resp?.ok) {
           tierMap = resp.tiers || {};
+          rebuildLooseIndex();
           console.log(TAG, `Tier list: ${resp.count} weapons (${resp.cached ? "cached" : "fresh"}, ${resp.fetchedAt}).`);
           // Re-badge anything already open now that we have data.
           document.querySelectorAll(`[${BADGE_ATTR}]`).forEach((n) => n.remove());
@@ -293,6 +315,24 @@
     const counts = {};
     for (const { grade } of ownedTiered()) counts[grade] = (counts[grade] || 0) + 1;
     return counts;
+  }
+
+  // How many of your owned weapons matched the tier list, and which didn't.
+  function coverage() {
+    const seen = new Set();
+    const unmatched = new Set();
+    let matched = 0;
+    for (const [, item] of vault.byInstance) {
+      const def = vault.defs.get(item.itemHash);
+      if (!def || !(def.itemCategoryHashes || []).includes(1)) continue; // weapons only
+      if (excludeExotics && isExotic(def)) continue;
+      const name = def.displayProperties?.name;
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      if (lookupTier(name).known) matched++;
+      else unmatched.add(name);
+    }
+    return { ownedWeapons: seen.size, matched, unmatched: [...unmatched].sort() };
   }
 
   // Build a DIM search matching owned weapons in the selected tiers.
@@ -421,6 +461,7 @@
         ok: vault.ready,
         ready: vault.ready,
         counts: vault.ready ? tierCounts() : {},
+        coverage: vault.ready ? coverage() : null,
         redundant: redundant.size,
         highlightOn,
         excludeExotics,
