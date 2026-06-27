@@ -28,7 +28,7 @@
   const BADGE_ATTR = "data-va-badge";
   const SHARD_ATTR = "data-va-shard";
   const STATE_LOCKED = 1; // Bungie item.state bitflag
-  const BUILD = "dup-v2"; // bump to confirm a fresh load in the popup diagnostic line
+  const BUILD = "dup-v3"; // bump to confirm a fresh load in the popup diagnostic line
 
   // Names we don't count as "perks" (shown in the tooltip, not used for the tier).
   const PERK_NAME_BLOCKLIST = [/shader/i, /empty .*socket/i, /masterwork/i, /^default ornament$/i, /tracker/i, /memento/i];
@@ -519,6 +519,11 @@
   chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
     if (!msg) return;
     if ("excludeExotics" in msg) setExclude(msg.excludeExotics); // sync with popup
+    // Recompute on demand so we never depend on load-time ordering of vault vs tier list.
+    if (vault.ready && Object.keys(tierMap).length) {
+      computeRedundant();
+      applyHighlights();
+    }
 
     if (msg.type === "tierCounts") {
       let dupGroups = 0;
