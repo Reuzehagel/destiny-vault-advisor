@@ -67,11 +67,13 @@
 
   function lookupTier(name) {
     const hit = tierMap[normalizeName(name)] || tierLoose[looseName(name)];
-    if (!hit) return { grade: "–", color: UNKNOWN_COLOR, known: false, notes: "Not in the tier list." };
+    if (!hit) return { grade: "–", color: UNKNOWN_COLOR, known: false, tiered: false, notes: "Not in the tier list." };
+    const graded = TIER_COLOR[hit.tier];
     return {
-      grade: hit.tier,
-      color: TIER_COLOR[hit.tier] || UNKNOWN_COLOR,
+      grade: graded ? hit.tier : "•", // some listed weapons have recommended perks but no tier
+      color: graded || "#7d8590",
       known: true,
+      tiered: Boolean(graded),
       rank: hit.rank,
       notes: hit.notes,
       category: hit.category,
@@ -206,7 +208,9 @@
       keeper: keep,
       reasons: [
         t.known
-          ? `${name} — Tier ${t.grade}${t.rank ? ` · Rank ${t.rank}` : ""}${t.category ? ` (${t.category})` : ""}`
+          ? t.tiered
+            ? `${name} — Tier ${t.grade}${t.rank ? ` · Rank ${t.rank}` : ""}${t.category ? ` (${t.category})` : ""}`
+            : `${name} — listed (no tier rating)${t.category ? ` (${t.category})` : ""}`
           : `${name} — not in the tier list`,
         t.notes || "",
         rec ? `Want: ${rec}` : "",

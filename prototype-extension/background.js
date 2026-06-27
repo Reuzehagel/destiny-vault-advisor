@@ -15,7 +15,7 @@ const WEAPON_TABS = [
   "Fusions", "Glaives", "Shotguns", "Snipers", "Rocket Sidearms", "Traces",
   "HGLs", "LFRs", "LMGs", "Rockets", "Swords", "Other", "Exotic Weapons",
 ];
-const CACHE_KEY = "tierCache2"; // bumped when the cached shape changes (added barrel/mag)
+const CACHE_KEY = "tierCache3"; // bumped on shape/content change (barrel/mag; untiered entries)
 const TTL_MS = 12 * 60 * 60 * 1000; // refetch at most twice a day
 
 const tabUrl = (tab) =>
@@ -78,22 +78,19 @@ function buildFromTab(category, csv) {
   for (let r = 1; r < rows.length; r++) {
     const row = rows[r];
     const name = cell(row, iName);
+    if (!name) continue;
     const tier = cell(row, iTier);
-    if (!name || !tier) continue;
-    out.push({
-      name,
-      tier,
-      rank: cell(row, iRank),
-      notes: cell(row, iNotes),
-      category,
-      // recommended perks, used to rank duplicate copies (keep vs shard)
-      perks: {
-        barrel: lines(cell(row, iBarrel)),
-        mag: lines(cell(row, iMag)),
-        perk1: lines(cell(row, iPerk1)),
-        perk2: lines(cell(row, iPerk2)),
-      },
-    });
+    // recommended perks, used to rank duplicate copies (keep vs shard)
+    const perks = {
+      barrel: lines(cell(row, iBarrel)),
+      mag: lines(cell(row, iMag)),
+      perk1: lines(cell(row, iPerk1)),
+      perk2: lines(cell(row, iPerk2)),
+    };
+    // Keep real entries: some tabs (e.g. "Other") list weapons with recommended
+    // perks but no tier yet — still useful for keep-vs-shard.
+    if (!tier && !perks.perk1.length && !perks.perk2.length) continue;
+    out.push({ name, tier, rank: cell(row, iRank), notes: cell(row, iNotes), category, perks });
   }
   return out;
 }
