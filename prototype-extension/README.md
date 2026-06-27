@@ -64,8 +64,12 @@ you read perks, instead of in a tooltip.
 How it matches: DIM's perk circles carry only an icon in the DOM (the name is
 hover-only), so on load the extension indexes every plug in the manifest by
 `icon → name` and matches the sheet's recommended **names** to on-screen circles via
-that icon. The glow is applied via a `data-` attribute (not a class) because DIM owns
-`className` on those SVGs and rewrites it on every re-render.
+that icon. Because different plugs can **share one icon** (e.g. the perk "One for All"
+and the mod "One for All Refit"), each icon maps to a *set* of names and a circle glows
+if any of them is recommended — an earlier last-write-wins map silently dropped a perk
+whenever a same-art plug with a higher hash existed. The glow is applied via a `data-`
+attribute (not a class) because DIM owns `className` on those SVGs and rewrites it on
+every re-render.
 
 ## Duplicates — keep vs shard
 

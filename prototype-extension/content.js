@@ -189,16 +189,22 @@
       if (def) vault.defs.set(h, def);
     }
 
-    // Index every plug's icon -> name while the big table is in memory. DIM's perk
+    // Index every plug's icon -> name(s) while the big table is in memory. DIM's perk
     // circles render only the icon (the name is hover-only), so we match the sheet's
-    // recommended perk *names* to on-screen circles via the icon filename.
+    // recommended perk *names* to on-screen circles via the icon filename. Multiple
+    // plugs can SHARE one icon (e.g. "One for All" and the mod "One for All Refit"),
+    // so map each icon to a SET of names — a single last-write-wins value silently
+    // dropped the perk whenever a same-art plug with a higher hash existed.
     for (const key in bigTable) {
       const def = bigTable[key];
       if (!def || !def.plug) continue; // only pluggable items (perks/mods)
       const nm = def.displayProperties?.name;
       const ic = def.displayProperties?.icon;
       if (!nm || !ic) continue;
-      vault.perkNameByIcon.set(iconBase(ic), perkKey(nm));
+      const base = iconBase(ic);
+      let set = vault.perkNameByIcon.get(base);
+      if (!set) vault.perkNameByIcon.set(base, (set = new Set()));
+      set.add(perkKey(nm));
     }
     db.close();
 
@@ -295,9 +301,16 @@
     for (const img of container.querySelectorAll("svg image")) {
       const href = img.getAttribute("href") || img.getAttribute("xlink:href") || "";
       if (!href) continue;
-      const perk = vault.perkNameByIcon.get(iconBase(href));
-      if (!perk) continue;
-      const kind = tiers.get(perk);
+      const names = vault.perkNameByIcon.get(iconBase(href));
+      if (!names) continue;
+      // One icon can map to several plug names; glow if ANY is recommended, and let a
+      // primary (god-roll) match win over a secondary (barrel/mag) one.
+      let kind;
+      for (const n of names) {
+        const k = tiers.get(n);
+        if (k === "primary") { kind = "primary"; break; }
+        if (k) kind = k;
+      }
       if (!kind) continue;
       const svg = img.closest("svg") || img;
       if (svg.getAttribute(PERK_MARK) === kind) continue;
