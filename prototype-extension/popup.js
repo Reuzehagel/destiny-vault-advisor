@@ -13,6 +13,7 @@ const COLOR = {
 
 const $ = (id) => document.getElementById(id);
 const status = (m) => ($("status").textContent = m);
+const excludeChecked = () => $("exclude").checked;
 
 // Promise wrappers (callback style works in both Firefox and Chromium).
 const getActiveTab = () =>
@@ -46,7 +47,7 @@ async function run(apply) {
   const tiers = selectedTiers();
   if (!tiers.length) return status("Pick at least one tier.");
   if (!tab) return status("Open DIM in this tab first.");
-  const resp = await sendToTab(tab.id, { type: "tierSearch", tiers, apply });
+  const resp = await sendToTab(tab.id, { type: "tierSearch", tiers, apply, excludeExotics: excludeChecked() });
   if (!resp) return status("No response — is DIM open and loaded?");
   if (!resp.ok) return status(resp.error || "Vault still loading…");
   if (!resp.count) return status("No owned weapons in those tiers.");
@@ -64,26 +65,64 @@ async function run(apply) {
   }
 }
 
+function applyCounts(resp) {
+  renderTiers(resp?.counts || {});
+  $("redundant-count").textContent = resp?.redundant ?? 0;
+  $("redundant").checked = Boolean(resp?.highlightOn);
+  if (resp && !resp.ready) status("Vault still loading in DIM…");
+}
+
+async function toggleRedundant() {
+  if (!tab) return status("Open DIM first.");
+  const resp = await sendToTab(tab.id, {
+    type: "highlightRedundant",
+    on: $("redundant").checked,
+    excludeExotics: excludeChecked(),
+  });
+  if (!resp) return status("No response — is DIM open and loaded?");
+  $("redundant-count").textContent = resp.redundant ?? 0;
+  status($("redundant").checked ? `Highlighting ${resp.redundant} redundant rolls.` : "Highlighting off.");
+}
+
+async function runRedundant(apply) {
+  if (!tab) return status("Open DIM first.");
+  const resp = await sendToTab(tab.id, { type: "redundantSearch", apply, excludeExotics: excludeChecked() });
+  if (!resp) return status("No response — is DIM open and loaded?");
+  if (!resp.instances) return status("No redundant rolls found.");
+  if (apply) {
+    $("redundant").checked = Boolean(resp.highlightOn);
+    status(resp.applied ? `${resp.weapons} weapons, ${resp.instances} shardable copies.` : "Couldn't find DIM's search box.");
+  } else {
+    try {
+      await navigator.clipboard.writeText(resp.query);
+      status(`Copied — ${resp.weapons} weapons.`);
+    } catch {
+      status("Clipboard blocked; query in console.");
+      console.log(resp.query);
+    }
+  }
+}
+
+async function refresh() {
+  if (!tab) return;
+  applyCounts(await sendToTab(tab.id, { type: "tierCounts", excludeExotics: excludeChecked() }));
+}
+
 async function init() {
   tab = await getActiveTab();
-  const onDim = tab && /app\.destinyitemmanager\.com/.test(tab.url || "");
-  if (!onDim) {
-    // url may be hidden without the tabs permission — try messaging anyway.
-    const resp = tab && (await sendToTab(tab.id, { type: "tierCounts" }));
-    if (!resp) {
-      status("Open DIM to use this.");
-      renderTiers({});
-      return;
-    }
-    renderTiers(resp.counts);
-    if (!resp.ready) status("Vault still loading in DIM…");
+  const resp = tab && (await sendToTab(tab.id, { type: "tierCounts", excludeExotics: excludeChecked() }));
+  if (!resp) {
+    status("Open DIM to use this.");
+    renderTiers({});
     return;
   }
-  const resp = await sendToTab(tab.id, { type: "tierCounts" });
-  renderTiers(resp?.counts || {});
-  if (resp && !resp.ready) status("Vault still loading in DIM…");
+  applyCounts(resp);
 }
 
 $("apply").addEventListener("click", () => run(true));
 $("copy").addEventListener("click", () => run(false));
+$("exclude").addEventListener("change", refresh);
+$("redundant").addEventListener("change", toggleRedundant);
+$("redundant-apply").addEventListener("click", () => runRedundant(true));
+$("redundant-copy").addEventListener("click", () => runRedundant(false));
 init();

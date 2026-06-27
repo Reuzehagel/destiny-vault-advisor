@@ -43,7 +43,26 @@ each showing how many of **your owned** weapons fall in it. Tick any combination
 - **Copy** — copies the query to your clipboard instead.
 
 Because it's built from weapons you actually own, the query stays short. DIM has no
-native "tier" concept, so matching is by weapon name.
+native "tier" concept, so matching is by weapon name. **Exclude exotics** (top of the
+popup) drops exotics from the counts, tier search, and redundancy.
+
+## Redundant rolls (shard helper)
+
+When you own multiple copies of the same weapon, the extension scores each copy by
+how many of the **sheet's recommended perks** it has. Copies worse than your best
+copy are flagged as shard candidates:
+
+It's its own section in the popup (independent of the tier checkboxes):
+
+- **Apply to DIM** — filters DIM to the weapons that have a shardable copy and turns on
+  the outline, so the worse copies are the red-outlined tiles in that view.
+- **Highlight on tiles** — outlines shard candidates everywhere, without filtering.
+- **Copy** — copies the weapon query.
+- The popup badge gains a red ring, and its tooltip shows the recommended perks
+  ("Want: …"), your roll, and "⚠ Redundant — you own a better-rolled copy."
+
+Locked copies are never flagged, and **Exclude exotics** removes exotics here too. If no copy has any recommended perk, nothing in
+that group is flagged (there's no clear "better" copy to keep).
 
 ## Known prototype limitations
 

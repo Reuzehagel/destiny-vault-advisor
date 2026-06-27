@@ -46,21 +46,43 @@
         font: inherit;
         color: #fff;
       }
-      #apply { background: #238636; }
-      #copy { background: #30343c; }
+      #apply, #redundant-apply { background: #238636; }
+      #copy, #redundant-copy { background: #30343c; }
       button:disabled { opacity: 0.5; cursor: default; }
       .status { font-size: 11px; opacity: 0.75; margin-top: 8px; min-height: 14px; }
+      hr { border: 0; border-top: 1px solid #2a2d34; margin: 12px 0; }
+      .toggle { display: flex; align-items: center; gap: 8px; padding: 4px 6px; cursor: pointer; }
+      .toggle .count { margin-left: auto; opacity: 0.6; font-variant-numeric: tabular-nums; }
+      .hint { font-size: 11px; opacity: 0.55; margin: 4px 6px 0; }
     </style>
   </head>
   <body>
     <h1>Tier search</h1>
     <div class="sub">Owned weapons by tier → DIM search</div>
+    <label class="toggle" style="margin: 0 0 8px">
+      <input type="checkbox" id="exclude" />
+      <span>Exclude exotics</span>
+    </label>
     <div class="tiers" id="tiers"></div>
     <div class="btns">
       <button id="apply">Apply to DIM</button>
       <button id="copy">Copy</button>
     </div>
     <div class="status" id="status"></div>
+
+    <hr />
+    <h1>Redundant rolls <span class="count" id="redundant-count" style="opacity:.6">0</span></h1>
+    <div class="sub">Duplicate copies worse than your best</div>
+    <label class="toggle" style="margin: 0 0 8px">
+      <input type="checkbox" id="redundant" />
+      <span>Highlight on tiles</span>
+    </label>
+    <div class="btns">
+      <button id="redundant-apply">Apply to DIM</button>
+      <button id="redundant-copy">Copy</button>
+    </div>
+    <div class="hint">Filters DIM to weapons with a shardable copy; the worse copies are outlined.</div>
+
     <script src="popup.js"></script>
   </body>
 </html>
