@@ -89,6 +89,24 @@ Popup controls (independent of the tier checkboxes):
 Locked copies are never flagged for shard, and **Exclude exotics** removes exotics here too. If no copy has any recommended perk, nothing in
 that group is flagged (there's no clear "better" copy to keep).
 
+## Armor cleanup
+
+Armor has no community tier sheet — a piece's worth is computed from its stats for
+the build you want (Armor 3.0: stat archetypes, set bonuses, gear tiers T1–T5, the
+100-point breakpoint). Rather than reimplement that, the popup's **Armor cleanup**
+presets delegate to **DIM's own search filters**, which already encode this logic and
+stay current as the sandbox changes. Each preset just drops a query into DIM's search
+box (same mechanism as tier search):
+
+| Preset | DIM query | Finds |
+| --- | --- | --- |
+| **Low / legacy tier** | `is:armor -is:exotic -is:locked tier:<=3` | Gear tier 3 and below. Legacy (pre-Edge-of-Fate) armor reads as tier `0`, so this sweeps obsolete *and* low-tier pieces in one pass. |
+| **Worse-stat dupes** | `is:armor -is:exotic -is:locked dupe:setbonus+statlower` | Within each armor set, pieces beaten on every stat by another piece you own — set-aware Pareto dominance, computed by DIM. |
+
+Both exclude exotics and locked pieces. These surface **candidates to review**, not an
+auto-shard list — set bonuses and build needs can still make a "worse" piece worth
+keeping, so eyeball the filtered results before dismantling.
+
 ## Name matching & coverage
 
 Sheet names and in-game names are matched after **normalization** (accent strip,

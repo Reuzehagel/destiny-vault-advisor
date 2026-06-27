@@ -488,6 +488,15 @@
     return true;
   }
 
+  // Armor cleanup presets. We delegate the hard Armor 3.0 logic (tier, set-aware
+  // stat dominance) to DIM's own search filters and just apply the query — DIM
+  // keeps these correct as the sandbox changes. tier:<=3 also sweeps legacy
+  // (pre-Edge-of-Fate) armor, which reads as tier 0.
+  const ARMOR_QUERIES = {
+    lowtier: "is:armor -is:exotic -is:locked tier:<=3",
+    dupes: "is:armor -is:exotic -is:locked dupe:setbonus+statlower",
+  };
+
   // --- Duplicate rolls: which copy to keep ----------------------------------
   // Does this copy have any of the recommended perks in each column?
   function matchInfo(instanceId, rec) {
@@ -652,6 +661,12 @@
         applyHighlights();
       }
       respond({ ok: true, query, weapons, instances, applied, highlightOn });
+      return;
+    }
+    if (msg.type === "armorSearch") {
+      const query = ARMOR_QUERIES[msg.preset] || "";
+      const applied = msg.apply && query ? setDimSearch(query) : false;
+      respond({ ok: Boolean(query), query, applied });
       return;
     }
   });

@@ -139,6 +139,24 @@ async function runRedundant(apply) {
   }
 }
 
+async function armorSearch(preset, apply) {
+  if (!tab) return status("Open DIM first.");
+  const resp = await sendToTab(tab.id, { type: "armorSearch", preset, apply });
+  if (!resp) return status("No response — is DIM open and loaded?");
+  if (!resp.ok) return status("Unknown armor preset.");
+  if (apply) {
+    status(resp.applied ? "Applied armor filter to DIM." : "Couldn't find DIM's search box.");
+  } else {
+    try {
+      await navigator.clipboard.writeText(resp.query);
+      status("Copied armor query.");
+    } catch {
+      status("Clipboard blocked; query in console.");
+      console.log(resp.query);
+    }
+  }
+}
+
 async function refresh() {
   if (!tab) return;
   applyCounts(await sendToTab(tab.id, { type: "tierCounts", excludeExotics: excludeChecked() }));
@@ -162,4 +180,8 @@ $("redundant").addEventListener("change", toggleRedundant);
 $("redundant-apply").addEventListener("click", () => runRedundant(true));
 $("redundant-copy").addEventListener("click", () => runRedundant(false));
 $("coverage").addEventListener("click", copyUnmatched);
+$("armor-lowtier-apply").addEventListener("click", () => armorSearch("lowtier", true));
+$("armor-lowtier-copy").addEventListener("click", () => armorSearch("lowtier", false));
+$("armor-dupes-apply").addEventListener("click", () => armorSearch("dupes", true));
+$("armor-dupes-copy").addEventListener("click", () => armorSearch("dupes", false));
 init();

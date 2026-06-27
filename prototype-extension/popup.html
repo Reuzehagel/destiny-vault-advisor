@@ -170,6 +170,22 @@
       button:disabled { opacity: 0.45; cursor: default; transform: none; }
       .btns .primary:disabled { background: rgb(255 255 255 / 0.1); color: var(--text); }
 
+      /* ---- Armor cleanup ------------------------------------------------ */
+      .subsec { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+      .preset {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 9px 10px;
+        border-radius: 9px;
+        background: var(--card);
+        margin-bottom: 6px;
+      }
+      .preset-name { display: flex; flex-direction: column; line-height: 1.3; font-size: 12px; font-weight: 600; }
+      .preset-name small { color: var(--text-3); font-size: 10.5px; font-weight: 400; }
+      .preset-btns { display: flex; gap: 6px; }
+      button.mini { padding: 6px 11px; font-size: 12px; }
+
       .status { font-size: 11px; color: #d8d8e4; margin-top: 9px; min-height: 14px; text-wrap: pretty; }
       .hint { font-size: 11px; color: var(--text-3); margin-top: 10px; text-wrap: pretty; }
       .legend { display: inline-flex; align-items: center; gap: 5px; }
@@ -217,6 +233,25 @@
           &nbsp;·&nbsp;
           <span class="legend"><span class="dot" style="background:#f85149"></span>shard</span>
           &nbsp;— Apply filters DIM to weapons with extra copies.
+        </div>
+
+        <div class="subsec">
+          <div class="sec-head"><h2>Armor cleanup</h2></div>
+          <p class="sub" style="min-height:0">Shard candidates, via DIM's own armor filters.</p>
+          <div class="preset">
+            <span class="preset-name">Low / legacy tier<small>Tier 3 &amp; below (incl. old armor)</small></span>
+            <div class="preset-btns">
+              <button class="mini primary" id="armor-lowtier-apply">Apply</button>
+              <button class="mini" id="armor-lowtier-copy">Copy</button>
+            </div>
+          </div>
+          <div class="preset">
+            <span class="preset-name">Worse-stat dupes<small>Beaten on every stat within a set</small></span>
+            <div class="preset-btns">
+              <button class="mini primary" id="armor-dupes-apply">Apply</button>
+              <button class="mini" id="armor-dupes-copy">Copy</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
