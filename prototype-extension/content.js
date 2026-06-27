@@ -212,29 +212,59 @@
   }
 
   // --- Badge injection ------------------------------------------------------
+  // Styles injected once. The badge lives inside DIM, so it borrows DIM's font
+  // and renders with layered shadows, a crisp inner ring, a hover lift, and a
+  // gentle enter animation so it reads as part of the popup, not bolted on.
+  function ensureBadgeStyles() {
+    if (document.getElementById("va-badge-styles")) return;
+    const s = document.createElement("style");
+    s.id = "va-badge-styles";
+    s.textContent = `
+      .va-badge {
+        position: absolute; top: 8px; right: 10px; z-index: 5;
+        box-sizing: border-box; min-width: 24px; height: 24px; padding: 0 6px;
+        display: flex; align-items: center; justify-content: center;
+        border-radius: 6px;
+        font-family: 'Open Sans', system-ui, sans-serif;
+        font-weight: 700; font-size: 14px; line-height: 1;
+        color: #0b0d10; cursor: default; user-select: none;
+        -webkit-font-smoothing: antialiased;
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+          0 1px 2px rgba(0, 0, 0, 0.45),
+          0 2px 8px rgba(0, 0, 0, 0.25);
+        transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.12s cubic-bezier(0.2, 0, 0, 1);
+        animation: va-badge-pop 0.18s cubic-bezier(0.2, 0, 0, 1);
+      }
+      .va-badge:hover {
+        transform: scale(1.06);
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.28),
+          0 2px 4px rgba(0, 0, 0, 0.5),
+          0 4px 12px rgba(0, 0, 0, 0.3);
+      }
+      .va-badge.va-redundant {
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+          0 0 0 2px #f85149,
+          0 2px 8px rgba(0, 0, 0, 0.3);
+      }
+      @keyframes va-badge-pop {
+        from { opacity: 0; transform: scale(0.85); }
+        to { opacity: 1; transform: scale(1); }
+      }
+      .item[${SHARD_ATTR}] { transition: outline-color 0.12s ease; }
+    `;
+    document.head.appendChild(s);
+  }
+
   function makeBadge(tier) {
     const el = document.createElement("div");
     el.setAttribute(BADGE_ATTR, "1");
+    el.className = tier.redundant ? "va-badge va-redundant" : "va-badge";
     el.title = tier.reasons.join("\n");
     el.textContent = tier.grade;
-    el.style.cssText = [
-      "position:absolute",
-      "top:8px",
-      "right:10px",
-      "z-index:5",
-      "width:26px",
-      "height:26px",
-      "display:flex",
-      "align-items:center",
-      "justify-content:center",
-      "border-radius:6px",
-      "font:700 15px/1 ui-monospace,Menlo,Consolas,monospace",
-      "color:#0b0d10",
-      `background:${tier.color}`,
-      tier.redundant ? "box-shadow:0 0 0 2px #f85149,0 1px 4px rgba(0,0,0,.5)" : "box-shadow:0 1px 4px rgba(0,0,0,.5)",
-      "cursor:default",
-      "pointer-events:auto",
-    ].join(";");
+    el.style.background = tier.color;
     return el;
   }
 
@@ -499,6 +529,7 @@
 
   // --- Wire up --------------------------------------------------------------
   function start() {
+    ensureBadgeStyles();
     // Remember which instance was clicked (capture phase, before DIM stops it).
     document.addEventListener(
       "click",
