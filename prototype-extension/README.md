@@ -46,22 +46,26 @@ Because it's built from weapons you actually own, the query stays short. DIM has
 native "tier" concept, so matching is by weapon name. **Exclude exotics** (top of the
 popup) drops exotics from the counts, tier search, and redundancy.
 
-## Redundant rolls (shard helper)
+## Duplicates — keep vs shard
 
-When you own multiple copies of the same weapon, the extension scores each copy by
-how many of the **sheet's recommended perks** it has. Copies worse than your best
-copy are flagged as shard candidates:
+When you own multiple copies of the same weapon, the extension ranks them against the
+**sheet's recommended roll** and picks the single best to keep:
 
-It's its own section in the popup (independent of the tier checkboxes):
+- **Ranking:** recommended Perk 1 + Perk 2 matches dominate, then barrel/mag, then
+  masterwork as a tiebreak. The top copy is the **keeper**; the rest are shard candidates.
+- **On tiles:** the keeper gets a **green** outline, shard candidates get **red**.
+- **In the popup badge:** a green ring (keep) or red ring (shard), with a tooltip showing
+  the recommended perks ("Want: …"), your roll, and "✓ Keep" / "⚠ Shard — you own a
+  better copy".
 
-- **Apply to DIM** — filters DIM to the weapons that have a shardable copy and turns on
-  the outline, so the worse copies are the red-outlined tiles in that view.
-- **Highlight on tiles** — outlines shard candidates everywhere, without filtering.
+Popup controls (independent of the tier checkboxes):
+
+- **Apply to DIM** — filters DIM to weapons that have extra copies; keep/shard outlines
+  make the decision obvious in that view.
+- **Highlight on tiles** — outlines everywhere, without filtering.
 - **Copy** — copies the weapon query.
-- The popup badge gains a red ring, and its tooltip shows the recommended perks
-  ("Want: …"), your roll, and "⚠ Redundant — you own a better-rolled copy."
 
-Locked copies are never flagged, and **Exclude exotics** removes exotics here too. If no copy has any recommended perk, nothing in
+Locked copies are never flagged for shard, and **Exclude exotics** removes exotics here too. If no copy has any recommended perk, nothing in
 that group is flagged (there's no clear "better" copy to keep).
 
 ## Name matching & coverage

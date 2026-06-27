@@ -79,9 +79,12 @@
     };
   }
 
-  // Redundant-roll state. redundant: instanceId -> { name, score, best }.
+  // Duplicate-roll state.
+  //   keepers:   instanceId set — the best copy to KEEP in each duplicate group.
+  //   redundant: instanceId -> { name, count, m, keep } — worse copies to shard.
   let highlightOn = false;
   let redundant = new Map();
+  let keepers = new Set();
   let excludeExotics = false;
   const isExotic = (def) => def?.inventory?.tierType === 6;
 
@@ -195,10 +198,12 @@
     const perks = perkNames(item.itemInstanceId);
     const rec = recommendedPerks(t);
     const dupe = redundant.get(item.itemInstanceId);
+    const keep = keepers.has(item.itemInstanceId);
     return {
       grade: t.grade,
       color: t.color,
       redundant: Boolean(dupe),
+      keeper: keep,
       reasons: [
         t.known
           ? `${name} — Tier ${t.grade}${t.rank ? ` · Rank ${t.rank}` : ""}${t.category ? ` (${t.category})` : ""}`
@@ -206,7 +211,8 @@
         t.notes || "",
         rec ? `Want: ${rec}` : "",
         perks.length ? `Your roll: ${perks.join(", ")}` : "",
-        dupe ? "⚠ Redundant — you own a better-rolled copy." : "",
+        keep ? "✓ Keep — best of your copies" : "",
+        dupe ? `⚠ Shard — you own a better copy (${dupe.count} total)` : "",
       ].filter(Boolean),
     };
   }
@@ -249,6 +255,12 @@
           0 0 0 2px #f85149,
           0 2px 8px rgba(0, 0, 0, 0.3);
       }
+      .va-badge.va-keep {
+        box-shadow:
+          inset 0 0 0 1px rgba(255, 255, 255, 0.2),
+          0 0 0 2px #3fb950,
+          0 2px 8px rgba(0, 0, 0, 0.3);
+      }
       @keyframes va-badge-pop {
         from { opacity: 0; transform: scale(0.85); }
         to { opacity: 1; transform: scale(1); }
@@ -261,7 +273,7 @@
   function makeBadge(tier) {
     const el = document.createElement("div");
     el.setAttribute(BADGE_ATTR, "1");
-    el.className = tier.redundant ? "va-badge va-redundant" : "va-badge";
+    el.className = "va-badge" + (tier.keeper ? " va-keep" : tier.redundant ? " va-redundant" : "");
     el.title = tier.reasons.join("\n");
     el.textContent = tier.grade;
     el.style.background = tier.color;
@@ -389,20 +401,20 @@
     return true;
   }
 
-  // --- Redundant duplicate rolls --------------------------------------------
-  // Score a copy by how many of the sheet's recommended perks it actually has.
-  function rollScore(instanceId, recPerks) {
-    if (!recPerks) return 0;
+  // --- Duplicate rolls: which copy to keep ----------------------------------
+  // Does this copy have any of the recommended perks in each column?
+  function matchInfo(instanceId, rec) {
     const have = new Set(perkNames(instanceId).map((n) => n.toLowerCase()));
-    const desired = [...(recPerks.perk1 || []), ...(recPerks.perk2 || [])].map((s) => s.toLowerCase());
-    let n = 0;
-    for (const d of desired) if (have.has(d)) n++;
-    return n;
+    const any = (arr) => Array.isArray(arr) && arr.some((p) => have.has(p.toLowerCase()));
+    return { p1: any(rec.perk1), p2: any(rec.perk2), barrel: any(rec.barrel), mag: any(rec.mag) };
   }
 
-  // Within each set of duplicate weapons, flag copies worse than your best copy.
+  // For each weapon you own multiple copies of, pick the single best to KEEP
+  // (most recommended perks, then barrel/mag, then masterwork) and mark the rest
+  // as shard candidates.
   function computeRedundant() {
     redundant = new Map();
+    keepers = new Set();
     if (!vault.ready || !Object.keys(tierMap).length) return;
 
     const groups = new Map(); // itemHash -> [{ id, item }]
@@ -416,49 +428,61 @@
       if (copies.length < 2) continue;
       const def = vault.defs.get(hash);
       if (excludeExotics && isExotic(def)) continue;
-      const rec = tierMap[(def.displayProperties?.name || "").toLowerCase()]?.perks;
-      if (!rec) continue; // need recommended perks to judge "the roll you want"
+      const name = def.displayProperties?.name || "";
+      const rec = lookupTier(name).perks;
+      if (!rec) continue; // need recommended perks to judge
 
-      const scored = copies.map((c) => ({
-        ...c,
-        score: rollScore(c.id, rec),
-        locked: ((c.item.state || 0) & STATE_LOCKED) !== 0,
-      }));
-      const best = Math.max(...scored.map((s) => s.score));
-      if (best <= 0) continue; // no copy has the wanted roll — nothing to flag
+      const scored = copies.map((c) => {
+        const m = matchInfo(c.id, rec);
+        const perkScore = (m.p1 ? 1 : 0) + (m.p2 ? 1 : 0);
+        const masterwork = ((c.item.state || 0) & STATE_MASTERWORK) !== 0;
+        // perks dominate, then barrel/mag, then masterwork as a final tiebreak.
+        const composite = perkScore * 1000 + ((m.barrel ? 1 : 0) + (m.mag ? 1 : 0)) * 100 + (masterwork ? 1 : 0);
+        return { ...c, m, perkScore, composite, locked: ((c.item.state || 0) & STATE_LOCKED) !== 0 };
+      });
+      if (Math.max(...scored.map((s) => s.perkScore)) <= 0) continue; // no copy has a wanted perk
 
-      for (const s of scored) {
-        if (s.score < best && !s.locked) {
-          redundant.set(s.id, { name: def.displayProperties?.name, score: s.score, best });
-        }
+      let keeper = scored[0];
+      for (const s of scored) if (s.composite > keeper.composite) keeper = s;
+
+      const flagged = scored.filter((s) => s.id !== keeper.id && !s.locked);
+      if (!flagged.length) continue; // only the keeper, or the rest are locked
+
+      keepers.add(keeper.id);
+      for (const s of flagged) {
+        redundant.set(s.id, { name, count: copies.length, m: s.m, keep: keeper.m });
       }
     }
-    console.log(TAG, `Redundant rolls: ${redundant.size} shard candidates.`);
+    console.log(TAG, `Duplicates: ${keepers.size} keepers, ${redundant.size} shard candidates.`);
   }
 
-  function markTile(tile) {
-    tile.setAttribute(SHARD_ATTR, "1");
-    tile.style.outline = "2px solid #f85149";
-    tile.style.outlineOffset = "-2px";
-    tile.style.borderRadius = "4px";
-  }
   function clearTile(tile) {
     tile.removeAttribute(SHARD_ATTR);
     tile.style.outline = "";
     tile.style.outlineOffset = "";
+  }
+  function markTile(tile, kind) {
+    tile.setAttribute(SHARD_ATTR, kind); // "keep" | "shard"
+    tile.style.outline = `2px solid ${kind === "keep" ? "#3fb950" : "#f85149"}`;
+    tile.style.outlineOffset = "-2px";
+    tile.style.borderRadius = "4px";
   }
   function applyHighlights() {
     if (!highlightOn) {
       document.querySelectorAll(`[${SHARD_ATTR}]`).forEach(clearTile);
       return;
     }
-    // Clear outlines that are no longer redundant (e.g. after toggling exotics).
+    // Drop stale outlines (e.g. after toggling exotics).
     document.querySelectorAll(`[${SHARD_ATTR}]`).forEach((tile) => {
-      if (!redundant.has(tile.id)) clearTile(tile);
+      if (!keepers.has(tile.id) && !redundant.has(tile.id)) clearTile(tile);
     });
+    for (const id of keepers) {
+      const t = document.getElementById(id);
+      if (t && t.getAttribute(SHARD_ATTR) !== "keep") markTile(t, "keep");
+    }
     for (const id of redundant.keys()) {
-      const tile = document.getElementById(id);
-      if (tile && !tile.hasAttribute(SHARD_ATTR)) markTile(tile);
+      const t = document.getElementById(id);
+      if (t && t.getAttribute(SHARD_ATTR) !== "shard") markTile(t, "shard");
     }
   }
 

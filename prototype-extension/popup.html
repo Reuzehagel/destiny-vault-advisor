@@ -89,8 +89,8 @@
     <div class="hint" id="coverage" style="cursor: pointer"></div>
 
     <hr />
-    <h1>Redundant rolls <span class="count" id="redundant-count" style="opacity:.6">0</span></h1>
-    <div class="sub">Duplicate copies worse than your best</div>
+    <h1>Duplicates <span class="count" id="redundant-count" style="opacity:.6">0</span> <span style="opacity:.6;font-weight:400">to shard</span></h1>
+    <div class="sub">Keeps your best copy of each, flags the rest</div>
     <label class="toggle" style="margin: 0 0 8px">
       <input type="checkbox" id="redundant" />
       <span>Highlight on tiles</span>
@@ -99,7 +99,7 @@
       <button id="redundant-apply">Apply to DIM</button>
       <button id="redundant-copy">Copy</button>
     </div>
-    <div class="hint">Filters DIM to weapons with a shardable copy; the worse copies are outlined.</div>
+    <div class="hint">Green = keep (best roll), red = shard. Apply filters DIM to weapons with extra copies.</div>
 
     <script src="popup.js"></script>
   </body>

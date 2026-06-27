@@ -15,7 +15,7 @@ const WEAPON_TABS = [
   "Fusions", "Glaives", "Shotguns", "Snipers", "Rocket Sidearms", "Traces",
   "HGLs", "LFRs", "LMGs", "Rockets", "Swords", "Other", "Exotic Weapons",
 ];
-const CACHE_KEY = "tierCache";
+const CACHE_KEY = "tierCache2"; // bumped when the cached shape changes (added barrel/mag)
 const TTL_MS = 12 * 60 * 60 * 1000; // refetch at most twice a day
 
 const tabUrl = (tab) =>
@@ -67,6 +67,8 @@ function buildFromTab(category, csv) {
   const iNotes = findCol(h, (s) => s.includes("notes"));
   const iPerk1 = findCol(h, (s) => s.includes("perk 1"));
   const iPerk2 = findCol(h, (s) => s.includes("perk 2"));
+  const iBarrel = findCol(h, (s) => s.includes("barrel"));
+  const iMag = findCol(h, (s) => s === "mag");
   if (iName < 0 || iTier < 0) return [];
 
   const cell = (row, i) => (i >= 0 ? (row[i] || "").trim() : "");
@@ -84,8 +86,13 @@ function buildFromTab(category, csv) {
       rank: cell(row, iRank),
       notes: cell(row, iNotes),
       category,
-      // recommended perks kept for a future "is this a god roll?" check
-      perks: { perk1: lines(cell(row, iPerk1)), perk2: lines(cell(row, iPerk2)) },
+      // recommended perks, used to rank duplicate copies (keep vs shard)
+      perks: {
+        barrel: lines(cell(row, iBarrel)),
+        mag: lines(cell(row, iMag)),
+        perk1: lines(cell(row, iPerk1)),
+        perk2: lines(cell(row, iPerk2)),
+      },
     });
   }
   return out;
