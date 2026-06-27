@@ -216,7 +216,7 @@
         rec ? `Want: ${rec}` : "",
         perks.length ? `Your roll: ${perks.join(", ")}` : "",
         keep ? "✓ Keep — best of your copies" : "",
-        dupe ? `⚠ Shard — you own a better copy (${dupe.count} total)` : "",
+        dupe ? `⚠ Shard — you own a better copy (${dupe.count} total)${dupe.locked ? " · unlock first" : ""}` : "",
       ].filter(Boolean),
     };
   }
@@ -449,12 +449,14 @@
       let keeper = scored[0];
       for (const s of scored) if (s.composite > keeper.composite) keeper = s;
 
-      const flagged = scored.filter((s) => s.id !== keeper.id && !s.locked);
-      if (!flagged.length) continue; // only the keeper, or the rest are locked
+      // Flag every worse copy — including locked ones (this user locks junk to avoid
+      // accidental dismantles, then wants to decide). Lock state is surfaced, not hidden.
+      const flagged = scored.filter((s) => s.id !== keeper.id);
+      if (!flagged.length) continue;
 
       keepers.add(keeper.id);
       for (const s of flagged) {
-        redundant.set(s.id, { name, count: copies.length, m: s.m, keep: keeper.m });
+        redundant.set(s.id, { name, count: copies.length, m: s.m, keep: keeper.m, locked: s.locked });
       }
     }
     console.log(TAG, `Duplicates: ${keepers.size} keepers, ${redundant.size} shard candidates.`);
