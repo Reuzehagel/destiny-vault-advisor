@@ -28,7 +28,7 @@
   const BADGE_ATTR = "data-va-badge";
   const SHARD_ATTR = "data-va-shard";
   const STATE_LOCKED = 1; // Bungie item.state bitflag
-  const BUILD = "dup-v3"; // bump to confirm a fresh load in the popup diagnostic line
+  const BUILD = "dup-v4"; // bump to confirm a fresh load in the popup diagnostic line
 
   // Names we don't count as "perks" (shown in the tooltip, not used for the tier).
   const PERK_NAME_BLOCKLIST = [/shader/i, /empty .*socket/i, /masterwork/i, /^default ornament$/i, /tracker/i, /memento/i];
@@ -88,6 +88,7 @@
   let highlightOn = false;
   let redundant = new Map();
   let keepers = new Set();
+  let computeError = "";
   let excludeExotics = false;
   const isExotic = (def) => def?.inventory?.tierType === 6;
 
@@ -420,50 +421,58 @@
   function computeRedundant() {
     redundant = new Map();
     keepers = new Set();
+    computeError = "";
     if (!vault.ready || !Object.keys(tierMap).length) return;
 
-    // Group by weapon NAME, not itemHash — reissued/differently-sourced copies of the
-    // same weapon have different hashes but are duplicates for keep-vs-shard purposes.
-    const groups = new Map(); // normalized name -> { name, copies: [{ id, item }] }
-    for (const [id, item] of vault.byInstance) {
-      const def = vault.defs.get(item.itemHash);
-      const name = def?.displayProperties?.name;
-      if (!name) continue;
-      if (excludeExotics && isExotic(def)) continue;
-      const key = normalizeName(name);
-      if (!groups.has(key)) groups.set(key, { name, copies: [] });
-      groups.get(key).copies.push({ id, item });
-    }
-
-    for (const { name, copies } of groups.values()) {
-      if (copies.length < 2) continue;
-      const rec = lookupTier(name).perks;
-      if (!rec) continue; // need recommended perks to judge
-
-      const scored = copies.map((c) => {
-        const m = matchInfo(c.id, rec);
-        const perkScore = (m.p1 ? 1 : 0) + (m.p2 ? 1 : 0);
-        const masterwork = ((c.item.state || 0) & STATE_MASTERWORK) !== 0;
-        // perks dominate, then barrel/mag, then masterwork as a final tiebreak.
-        const composite = perkScore * 1000 + ((m.barrel ? 1 : 0) + (m.mag ? 1 : 0)) * 100 + (masterwork ? 1 : 0);
-        return { ...c, m, perkScore, composite, locked: ((c.item.state || 0) & STATE_LOCKED) !== 0 };
-      });
-      if (Math.max(...scored.map((s) => s.perkScore)) <= 0) continue; // no copy has a wanted perk
-
-      let keeper = scored[0];
-      for (const s of scored) if (s.composite > keeper.composite) keeper = s;
-
-      // Flag every worse copy — including locked ones (this user locks junk to avoid
-      // accidental dismantles, then wants to decide). Lock state is surfaced, not hidden.
-      const flagged = scored.filter((s) => s.id !== keeper.id);
-      if (!flagged.length) continue;
-
-      keepers.add(keeper.id);
-      for (const s of flagged) {
-        redundant.set(s.id, { name, count: copies.length, m: s.m, keep: keeper.m, locked: s.locked });
+    try {
+      // Group by weapon NAME, not itemHash — reissued/differently-sourced copies of the
+      // same weapon have different hashes but are duplicates for keep-vs-shard purposes.
+      const groups = new Map(); // normalized name -> { name, copies: [{ id, item }] }
+      for (const [id, item] of vault.byInstance) {
+        const def = vault.defs.get(item.itemHash);
+        const name = def?.displayProperties?.name;
+        if (!name) continue;
+        if (excludeExotics && isExotic(def)) continue;
+        const key = normalizeName(name);
+        if (!groups.has(key)) groups.set(key, { name, copies: [] });
+        groups.get(key).copies.push({ id, item });
       }
+
+      for (const { name, copies } of groups.values()) {
+        if (copies.length < 2) continue;
+        const rec = lookupTier(name).perks;
+        if (!rec) continue; // need recommended perks to judge
+
+        const scored = copies.map((c) => {
+          const m = matchInfo(c.id, rec);
+          const perkScore = (m.p1 ? 1 : 0) + (m.p2 ? 1 : 0);
+          const masterwork = ((c.item.state || 0) & STATE_MASTERWORK) !== 0;
+          // perks dominate, then barrel/mag, then masterwork as a final tiebreak.
+          const composite = perkScore * 1000 + ((m.barrel ? 1 : 0) + (m.mag ? 1 : 0)) * 100 + (masterwork ? 1 : 0);
+          return { id: c.id, item: c.item, m, perkScore, composite, locked: ((c.item.state || 0) & STATE_LOCKED) !== 0 };
+        });
+        let bestPerk = 0;
+        for (const s of scored) if (s.perkScore > bestPerk) bestPerk = s.perkScore;
+        if (bestPerk <= 0) continue; // no copy has a wanted perk
+
+        let keeper = scored[0];
+        for (const s of scored) if (s.composite > keeper.composite) keeper = s;
+
+        // Flag every worse copy — including locked ones (this user locks junk to avoid
+        // accidental dismantles, then wants to decide). Lock state is surfaced, not hidden.
+        const flagged = scored.filter((s) => s.id !== keeper.id);
+        if (!flagged.length) continue;
+
+        keepers.add(keeper.id);
+        for (const s of flagged) {
+          redundant.set(s.id, { name, count: copies.length, m: s.m, keep: keeper.m, locked: s.locked });
+        }
+      }
+      console.log(TAG, `Duplicates: ${keepers.size} keepers, ${redundant.size} shard candidates.`);
+    } catch (e) {
+      computeError = String(e && e.message ? e.message : e);
+      console.error(TAG, "computeRedundant failed:", e);
     }
-    console.log(TAG, `Duplicates: ${keepers.size} keepers, ${redundant.size} shard candidates.`);
   }
 
   function clearTile(tile) {
@@ -567,6 +576,7 @@
           keepers: keepers.size,
           mintKnown: lookupTier("Mint Retrograde").known,
           probe,
+          err: computeError,
         },
       });
       return;

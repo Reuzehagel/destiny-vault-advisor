@@ -79,7 +79,7 @@ function applyCounts(resp) {
     : "";
   const d = resp?.debug;
   $("debug").textContent = d
-    ? `build ${d.build} · ${d.instances} items · ${d.tiers} tiered · ${d.dupGroups} dup groups · keep ${d.keepers} · mint:${d.mintKnown ? "yes" : "no"}\n${d.probe || ""}`
+    ? `build ${d.build} · ${d.instances} items · ${d.tiers} tiered · ${d.dupGroups} dup groups · keep ${d.keepers} · mint:${d.mintKnown ? "yes" : "no"}\n${d.probe || ""}${d.err ? `\nERR: ${d.err}` : ""}`
     : "";
   $("debug").style.whiteSpace = "pre-wrap";
   if (resp && !resp.ready) status("Vault still loading in DIM…");
