@@ -28,12 +28,17 @@ let tab = null;
 function renderTiers(counts) {
   const wrap = $("tiers");
   wrap.innerHTML = "";
+  const max = Math.max(1, ...TIERS.map((g) => counts?.[g] || 0));
   for (const g of TIERS) {
     const n = counts?.[g] || 0;
+    const pct = Math.round((n / max) * 100);
     const label = document.createElement("label");
+    label.className = "tier";
+    label.title = `${n} ${g}-tier weapon${n === 1 ? "" : "s"}`;
     label.innerHTML = `
       <input type="checkbox" value="${g}" ${n ? "" : "disabled"} />
       <span class="grade" style="background:${COLOR[g]}">${g}</span>
+      <span class="bar"><i style="width:${pct}%;background:${COLOR[g]}"></i></span>
       <span class="count">${n}</span>`;
     wrap.appendChild(label);
   }
@@ -67,16 +72,28 @@ async function run(apply) {
 
 let unmatched = [];
 
+function setRedundantPill(n) {
+  const el = $("redundant-count");
+  el.textContent = `${n ?? 0} to shard`;
+  el.classList.toggle("zero", !n);
+}
+
 function applyCounts(resp) {
   renderTiers(resp?.counts || {});
-  $("redundant-count").textContent = resp?.redundant ?? 0;
+  setRedundantPill(resp?.redundant);
   $("redundant").checked = Boolean(resp?.highlightOn);
   const cov = resp?.coverage;
   unmatched = cov?.unmatched || [];
-  $("coverage").textContent = cov
-    ? `On tier list: ${cov.matched}/${cov.ownedWeapons} owned weapons` +
-      (unmatched.length ? ` · click to copy ${unmatched.length} unmatched` : "")
-    : "";
+  const el = $("coverage");
+  if (cov) {
+    el.innerHTML =
+      `<span class="big">${cov.matched}/${cov.ownedWeapons}</span> on tier list` +
+      (unmatched.length ? `<span class="sep">·</span>copy ${unmatched.length} unmatched` : "");
+    el.classList.toggle("clickable", unmatched.length > 0);
+  } else {
+    el.textContent = "";
+    el.classList.remove("clickable");
+  }
   if (resp && !resp.ready) status("Vault still loading in DIM…");
 }
 
@@ -99,7 +116,7 @@ async function toggleRedundant() {
     excludeExotics: excludeChecked(),
   });
   if (!resp) return status("No response — is DIM open and loaded?");
-  $("redundant-count").textContent = resp.redundant ?? 0;
+  setRedundantPill(resp.redundant);
   status($("redundant").checked ? `Highlighting ${resp.redundant} redundant rolls.` : "Highlighting off.");
 }
 

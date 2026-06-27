@@ -35,9 +35,11 @@ Click any weapon. Logs are under `[VA-BADGE]`. Weapons not on the sheet show a m
 
 ## Tier search (toolbar popup)
 
-Click the extension's toolbar icon to open a popup with a checkbox per tier (S–F),
-each showing how many of **your owned** weapons fall in it. Tick any combination
-(e.g. F + C + B) and:
+Click the extension's toolbar icon to open the popup. Each tier (S–F) is a row with
+a colored grade chip, a **distribution bar** (how that tier's count compares to your
+others, at a glance), and the count of **your owned** weapons in it. The header shows
+a coverage stat (`142/150 on tier list`) you can click to copy unmatched names. Tick
+any combination of tiers (e.g. F + C + B) and:
 
 - **Apply to DIM** — drops a `(name:"…" or name:"…")` query into DIM's search box, so
   the matching weapons are filtered live.
