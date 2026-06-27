@@ -75,9 +75,15 @@ When you own multiple copies of the same weapon, the extension ranks them agains
 - **Ranking:** recommended Perk 1 + Perk 2 matches dominate, then barrel/mag, then
   masterwork as a tiebreak. The top copy is the **keeper**; the rest are shard candidates.
 - **On tiles:** the keeper gets a **green** outline, shard candidates get **red**.
-- **In the popup badge:** a green ring (keep) or red ring (shard), with a tooltip reading
-  "✓ Keep — best of your copies" / "⚠ Shard — you own a better copy" (the recommended
-  perks are shown as glows on the perk circles, not in the tooltip).
+- **In the popup badge:** a green ring (keep) or red ring (shard), with a tooltip that
+  **explains the verdict** by naming the recommended perks involved — e.g. "✓ Keep — best
+  roll: Reconstruction + Chill Clip", or on a shard copy "⚠ Shard — you own a better copy
+  (4 total) · keeper has Reconstruction + Chill Clip; this has none of the recommended
+  perks". The perks themselves still glow on the perk circles; the tooltip says *why*.
+
+Note: keep/shard ranks by **roll**, not power level — a low-power copy with the better
+perks is still the keeper (just infuse it up). It also uses this compendium's recommended
+perks, which can differ from DIM's own wishlist (the 👍 markers).
 
 Popup controls (independent of the tier checkboxes):
 

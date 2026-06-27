@@ -89,6 +89,7 @@
   let highlightOn = false;
   let redundant = new Map();
   let keepers = new Set();
+  let keeperInfo = new Map(); // keeper instanceId -> its matchInfo (for the "why keep" tooltip)
   let computeError = "";
   let excludeExotics = false;
   const isExotic = (def) => def?.inventory?.tierType === 6;
@@ -223,6 +224,25 @@
     const t = lookupTier(name);
     const dupe = redundant.get(item.itemInstanceId);
     const keep = keepers.has(item.itemInstanceId);
+
+    // Why this copy is the keeper / a shard candidate — the recommended perks it
+    // has vs the keeper's, so the verdict explains itself instead of just asserting.
+    let keepLine = "";
+    if (keep) {
+      const hits = recHits(keeperInfo.get(item.itemInstanceId));
+      keepLine = hits.length ? `✓ Keep — best roll: ${hits.join(" + ")}` : "✓ Keep — best of your copies";
+    }
+    let shardLine = "";
+    let shardWhy = "";
+    if (dupe) {
+      shardLine = `⚠ Shard — you own a better copy (${dupe.count} total)${dupe.locked ? " · unlock first" : ""}`;
+      const keepHits = recHits(dupe.keep);
+      const mineHits = recHits(dupe.m);
+      shardWhy =
+        `· keeper has ${keepHits.length ? keepHits.join(" + ") : "more recommended perks"}` +
+        `; this has ${mineHits.length ? mineHits.join(" + ") : "none of the recommended perks"}`;
+    }
+
     return {
       grade: t.grade,
       color: t.color,
@@ -235,8 +255,9 @@
             : `${name} — listed (no tier rating)${t.category ? ` (${t.category})` : ""}`
           : `${name} — not in the tier list`,
         t.notes || "",
-        keep ? "✓ Keep — best of your copies" : "",
-        dupe ? `⚠ Shard — you own a better copy (${dupe.count} total)${dupe.locked ? " · unlock first" : ""}` : "",
+        keepLine,
+        shardLine,
+        shardWhy,
       ].filter(Boolean),
     };
   }
@@ -500,9 +521,17 @@
   // --- Duplicate rolls: which copy to keep ----------------------------------
   // Does this copy have any of the recommended perks in each column?
   function matchInfo(instanceId, rec) {
-    const have = new Set(perkNames(instanceId).map((n) => n.toLowerCase()));
-    const any = (arr) => Array.isArray(arr) && arr.some((p) => have.has(p.toLowerCase()));
-    return { p1: any(rec.perk1), p2: any(rec.perk2), barrel: any(rec.barrel), mag: any(rec.mag) };
+    // Map of lowercased perk name -> the copy's actual display name, so we can both
+    // test membership and report which recommended perk this copy actually has.
+    const have = new Map(perkNames(instanceId).map((n) => [n.toLowerCase(), n]));
+    const hit = (arr) => (Array.isArray(arr) ? arr.map((p) => have.get(p.toLowerCase())).find(Boolean) || null : null);
+    const n1 = hit(rec.perk1), n2 = hit(rec.perk2), nb = hit(rec.barrel), nm = hit(rec.mag);
+    return { p1: !!n1, p2: !!n2, barrel: !!nb, mag: !!nm, names: { p1: n1, p2: n2, barrel: nb, mag: nm } };
+  }
+
+  // The recommended perks a copy actually has, perk1/perk2 first (the god-roll traits).
+  function recHits(m) {
+    return [m?.names?.p1, m?.names?.p2].filter(Boolean);
   }
 
   // For each weapon you own multiple copies of, pick the single best to KEEP
@@ -511,6 +540,7 @@
   function computeRedundant() {
     redundant = new Map();
     keepers = new Set();
+    keeperInfo = new Map();
     computeError = "";
     if (!vault.ready || !Object.keys(tierMap).length) return;
 
@@ -554,6 +584,7 @@
         if (!flagged.length) continue;
 
         keepers.add(keeper.id);
+        keeperInfo.set(keeper.id, keeper.m);
         for (const s of flagged) {
           redundant.set(s.id, { name, count: copies.length, m: s.m, keep: keeper.m, locked: s.locked });
         }
