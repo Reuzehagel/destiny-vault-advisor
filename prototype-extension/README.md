@@ -89,15 +89,25 @@ Note: keep/shard ranks by **roll**, not power level — a low-power copy with th
 perks is still the keeper (just infuse it up). It also uses this compendium's recommended
 perks, which can differ from DIM's own wishlist (the 👍 markers).
 
+Scoring counts **selectable** perks, not just the socketed one: a multi-perk drop (or
+crafted weapon) that can *toggle* to a recommended perk is credited with it, and a copy
+that can switch between two god-roll perks in a column (e.g. Demolitionist **and**
+Rimestealer) outranks one stuck with a single option.
+
 Popup controls (independent of the tier checkboxes):
 
 - **Apply to DIM** — filters DIM to weapons that have extra copies; keep/shard outlines
   make the decision obvious in that view.
+- **Keep complementary rolls** (on by default) — also keep an extra copy when it's your
+  only source of a recommended trait perk (e.g. the only one that can roll Mega Kill Clip),
+  instead of sharding it as a plain duplicate. Turn off for an aggressive single-keeper purge.
 - **Highlight on tiles** — outlines everywhere, without filtering.
 - **Copy** — copies the weapon query.
 
-Locked copies are never flagged for shard, and **Exclude exotics** removes exotics here too. If no copy has any recommended perk, nothing in
-that group is flagged (there's no clear "better" copy to keep).
+Locked copies **are** still flagged (the badge appends *· unlock first*) — this user
+locks junk to avoid accidental dismantles and wants to decide later, so lock state is
+surfaced, not hidden. **Exclude exotics** removes exotics here too. If no copy has any
+recommended perk, nothing in that group is flagged (there's no clear "better" copy to keep).
 
 ## Armor cleanup
 

@@ -15,7 +15,7 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://app.destinyitemmanager.com/*"],
+      "matches": ["https://app.destinyitemmanager.com/*", "https://beta.destinyitemmanager.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }

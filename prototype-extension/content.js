@@ -29,7 +29,7 @@
   const SHARD_ATTR = "data-va-shard";
   const STATE_LOCKED = 1; // Bungie item.state bitflag
   const STATE_MASTERWORK = 4; // Bungie item.state bitflag
-  const BUILD = "perks-v4"; // bump to confirm a fresh load in the popup diagnostic line
+  const BUILD = "perks-v7"; // bump to confirm a fresh load in the popup diagnostic line
 
   // Names we don't count as "perks" (shown in the tooltip, not used for the tier).
   const PERK_NAME_BLOCKLIST = [/shader/i, /empty .*socket/i, /masterwork/i, /^default ornament$/i, /tracker/i, /memento/i];
@@ -90,8 +90,13 @@
   let redundant = new Map();
   let keepers = new Set();
   let keeperInfo = new Map(); // keeper instanceId -> its matchInfo (for the "why keep" tooltip)
+  let keeperUnique = new Map(); // secondary-keeper instanceId -> [recommended perks only it can roll]
   let computeError = "";
   let excludeExotics = false;
+  // Keep a second copy when it's your only source of a recommended trait perk (e.g. the only
+  // one that can roll Mega Kill Clip), instead of sharding it as a plain duplicate. Default ON:
+  // never silently advise sharding your only access to a god-roll perk. Toggle in the popup.
+  let keepCoverage = true;
   const isExotic = (def) => def?.inventory?.tierType === 6;
 
   /** In-memory index built once from IndexedDB. */
@@ -102,8 +107,12 @@
     byInstance: new Map(),
     /** hash -> trimmed InventoryItem def (only owned + plug hashes) */
     defs: new Map(),
-    /** instanceId -> [plugHash, ...] (visible, enabled sockets) */
+    /** instanceId -> [plugHash, ...] (visible, enabled sockets — the currently socketed perks) */
     socketsByInstance: new Map(),
+    /** instanceId -> [plugHash, ...] every SELECTABLE perk across sockets — for multi-perk
+     *  drops (two togglable traits per column) and crafted weapons, this is wider than what's
+     *  currently socketed. For plain random rolls it's just the rolled perks. */
+    selectableByInstance: new Map(),
     /** icon basename -> perk name (perkKey'd) — to match DIM's icon-only plug circles */
     perkNameByIcon: new Map(),
   };
@@ -148,6 +157,7 @@
   async function loadVault() {
     const { db, existed } = await openDB("keyval-store");
     if (!existed) {
+      db.close(); // release the empty DB we just created before deleting it, or the delete blocks
       indexedDB.deleteDatabase("keyval-store");
       throw new Error("DIM cache not found — sign into DIM and let inventory load, then reload.");
     }
@@ -161,6 +171,7 @@
       const profile = await idbGet(db, "keyval", pk);
       if (!profile) continue;
       const socketData = profile.itemComponents?.sockets?.data || {};
+      const reusableData = profile.itemComponents?.reusablePlugs?.data || {};
       const buckets = [
         profile.profileInventory?.data?.items,
         ...Object.values(profile.characterInventories?.data || {}).map((c) => c.items),
@@ -176,6 +187,22 @@
             .map((s) => s.plugHash);
           vault.socketsByInstance.set(item.itemInstanceId, sockets);
           for (const h of sockets) neededHashes.add(h);
+
+          // Many modern weapons drop with TWO selectable perks per column that you can
+          // freely toggle between (no crafting required). DIM caches every selectable plug
+          // in the ItemReusablePlugs component, so for keep/shard scoring we credit any
+          // recommended perk the roll CAN present — not just the one currently socketed.
+          // For a plain random roll each socket lists only its single rolled perk, so this
+          // is a no-op there.
+          const bySocket = reusableData[item.itemInstanceId]?.plugs || {};
+          const selectable = [];
+          for (const col in bySocket) {
+            for (const p of bySocket[col] || []) if (p?.plugItemHash) selectable.push(p.plugItemHash);
+          }
+          if (selectable.length) {
+            vault.selectableByInstance.set(item.itemInstanceId, selectable);
+            for (const h of selectable) neededHashes.add(h);
+          }
         }
       }
     }
@@ -184,6 +211,7 @@
     const itemDefKey = keys.find((k) => /^d2-manifest-InventoryItem$/.test(k)) || keys.find((k) => /InventoryItem/.test(k));
     if (!itemDefKey) throw new Error("InventoryItem manifest table not cached yet.");
     const bigTable = await idbGet(db, "keyval", itemDefKey);
+    if (!bigTable) throw new Error("InventoryItem manifest table is empty — let DIM finish loading once.");
     for (const h of neededHashes) {
       const def = bigTable[h] ?? bigTable[String(h)];
       if (def) vault.defs.set(h, def);
@@ -214,12 +242,29 @@
 
   // The perks on the held roll — shown in the tooltip as context, NOT used to pick
   // the tier (tier is weapon-bound). Useful later for "is this a god roll?" matching.
-  function perkNames(instanceId) {
-    const plugs = vault.socketsByInstance.get(instanceId) || [];
-    return plugs
+  function plugNames(plugs) {
+    return (plugs || [])
       .map((h) => vault.defs.get(h)?.displayProperties?.name)
       .filter(Boolean)
       .filter((n) => !PERK_NAME_BLOCKLIST.some((re) => re.test(n)));
+  }
+
+  function perkNames(instanceId) {
+    return plugNames(vault.socketsByInstance.get(instanceId));
+  }
+
+  // Every recommended perk this copy can PRESENT — the socketed perks plus, for multi-perk
+  // drops/crafted weapons, the alternate selectable perks it can be toggled to. This is what
+  // keep/shard scoring matches against, so a copy isn't penalised for which of its togglable
+  // perks happens to be socketed right now.
+  function selectablePerkNames(instanceId) {
+    const selectable = vault.selectableByInstance.get(instanceId);
+    if (!selectable) return perkNames(instanceId); // component absent — score as-socketed
+    // Union socketed ∪ selectable: reusablePlugs normally already lists the socketed perk,
+    // but unioning guarantees we never drop it if the component is sparse for a socket.
+    const names = new Set(perkNames(instanceId));
+    for (const n of plugNames(selectable)) names.add(n);
+    return [...names];
   }
 
   // Assemble what the badge shows: weapon-bound tier + notes + dupe verdict. The
@@ -233,10 +278,22 @@
 
     // Why this copy is the keeper / a shard candidate — the recommended perks it
     // has vs the keeper's, so the verdict explains itself instead of just asserting.
+    // "has" when the perks are socketed; "can roll" when they're a selectable second perk
+    // on a multi-perk drop — so the verdict doesn't claim a perk is equipped when it isn't.
+    const verb = (m) => (m?.togglable ? "can roll" : "has");
     let keepLine = "";
     if (keep) {
-      const hits = recHits(keeperInfo.get(item.itemInstanceId));
-      keepLine = hits.length ? `✓ Keep — best roll: ${hits.join(" + ")}` : "✓ Keep — best of your copies";
+      const unique = keeperUnique.get(item.itemInstanceId);
+      if (unique && unique.length) {
+        // A secondary keeper held only because it's your sole source of these perks.
+        keepLine = `✓ Keep — your only copy that can roll ${unique.join(" + ")}`;
+      } else {
+        const m = keeperInfo.get(item.itemInstanceId);
+        const hits = recHits(m);
+        keepLine = hits.length
+          ? `✓ Keep — best roll: ${verb(m) === "can roll" ? "can roll " : ""}${hits.join(" + ")}`
+          : "✓ Keep — best of your copies";
+      }
     }
     let shardLine = "";
     let shardWhy = "";
@@ -244,9 +301,13 @@
       shardLine = `⚠ Shard — you own a better copy (${dupe.count} total)${dupe.locked ? " · unlock first" : ""}`;
       const keepHits = recHits(dupe.keep);
       const mineHits = recHits(dupe.m);
-      shardWhy =
-        `· keeper has ${keepHits.length ? keepHits.join(" + ") : "more recommended perks"}` +
-        `; this has ${mineHits.length ? mineHits.join(" + ") : "none of the recommended perks"}`;
+      // When both copies cover the same perks, the decider is depth (more switchable
+      // recommended options) — say so, or the two lines look identical and unexplained.
+      const moreOptions = (dupe.keep?.depth || 0) > (dupe.m?.depth || 0);
+      shardWhy = moreOptions
+        ? `· keeper has more recommended perks to switch between (${dupe.keep.depth} vs ${dupe.m.depth})`
+        : `· keeper ${verb(dupe.keep)} ${keepHits.length ? keepHits.join(" + ") : "more recommended perks"}` +
+          `; this ${mineHits.length ? `${verb(dupe.m)} ${mineHits.join(" + ")}` : "has none of the recommended perks"}`;
     }
 
     return {
@@ -296,25 +357,31 @@
     const name = container.querySelector("h1")?.textContent?.trim();
     if (!name) return;
     const tiers = recommendedNameTiers(lookupTier(name));
-    if (!tiers.size) return;
+    // Don't early-return on an empty `tiers`: a reused container (navigating to a
+    // weapon with no recommendations) still needs its old glows cleared below.
 
     for (const img of container.querySelectorAll("svg image")) {
+      const svg = img.closest("svg") || img;
       const href = img.getAttribute("href") || img.getAttribute("xlink:href") || "";
-      if (!href) continue;
-      const names = vault.perkNameByIcon.get(iconBase(href));
-      if (!names) continue;
+      const names = href ? vault.perkNameByIcon.get(iconBase(href)) : null;
       // One icon can map to several plug names; glow if ANY is recommended, and let a
       // primary (god-roll) match win over a secondary (barrel/mag) one.
       let kind;
-      for (const n of names) {
-        const k = tiers.get(n);
-        if (k === "primary") { kind = "primary"; break; }
-        if (k) kind = k;
+      if (names) {
+        for (const n of names) {
+          const k = tiers.get(n);
+          if (k === "primary") { kind = "primary"; break; }
+          if (k) kind = k;
+        }
       }
-      if (!kind) continue;
-      const svg = img.closest("svg") || img;
-      if (svg.getAttribute(PERK_MARK) === kind) continue;
-      svg.setAttribute(PERK_MARK, kind);
+      // Set OR clear: DIM reuses the .item-popup / .armory node and swaps the icon in
+      // place on re-render, so a circle that no longer earns a glow (different weapon,
+      // or a primary that's now only secondary) must lose its old mark — not just keep it.
+      if (kind) {
+        if (svg.getAttribute(PERK_MARK) !== kind) svg.setAttribute(PERK_MARK, kind);
+      } else if (svg.hasAttribute(PERK_MARK)) {
+        svg.removeAttribute(PERK_MARK);
+      }
     }
   }
 
@@ -510,12 +577,16 @@
     return { query, count: list.length };
   }
 
+  // React owns DIM's search box value, so we write through the native setter to make
+  // the change "real" before dispatching input/change. The descriptor is constant —
+  // resolve it once, not on every Apply.
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+
   function setDimSearch(query) {
     const inputs = [...document.querySelectorAll(".search-filter input")];
     const input = inputs.find((i) => i.offsetParent !== null) || inputs[0];
     if (!input) return false;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-    setter.call(input, query);
+    nativeInputValueSetter.call(input, query);
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
     input.focus();
@@ -538,10 +609,35 @@
     // and report which recommended perk this copy actually has. Keying by perkKey (not
     // a plain lowercase) means Enhanced variants count too, matching the glow logic — an
     // "Enhanced Chill Clip" roll now scores the same as the recommended "Chill Clip".
-    const have = new Map(perkNames(instanceId).map((n) => [perkKey(n), n]));
+    // Match against every SELECTABLE perk (a multi-perk drop can toggle to the god roll),
+    // and note which perks are togglable-but-not-socketed so the tooltip can say so.
+    const have = new Map(selectablePerkNames(instanceId).map((n) => [perkKey(n), n]));
+    const socketed = new Set(perkNames(instanceId).map((n) => perkKey(n)));
     const hit = (arr) => (Array.isArray(arr) ? arr.map((p) => have.get(perkKey(p))).find(Boolean) || null : null);
+    // How many DISTINCT recommended options in a column the copy can present. A multi-perk
+    // copy that can roll BOTH Demolitionist AND Rimestealer in slot 1 has more good options
+    // than one stuck with only Rimestealer — that extra flexibility is real and should count.
+    const count = (arr) => (Array.isArray(arr) ? arr.filter((p) => have.has(perkKey(p))).length : 0);
     const n1 = hit(rec.perk1), n2 = hit(rec.perk2), nb = hit(rec.barrel), nm = hit(rec.mag);
-    return { p1: !!n1, p2: !!n2, barrel: !!nb, mag: !!nm, names: { p1: n1, p2: n2, barrel: nb, mag: nm } };
+    // Total recommended options across all columns — the "good perks" count, used as a
+    // tiebreak below column coverage so more switchable god-roll perks wins.
+    const depth = count(rec.perk1) + count(rec.perk2) + count(rec.barrel) + count(rec.mag);
+    // Every DISTINCT recommended TRAIT perk (perk1/perk2) this copy can present, by their
+    // sheet names. Used by the keep-coverage pass to spot a copy that's your only source of a
+    // god-roll trait (e.g. the only one that can roll Mega Kill Clip). Traits only — barrel/mag
+    // variety isn't worth a vault slot.
+    const traitNames = [];
+    const seenTrait = new Set();
+    for (const p of [...(rec.perk1 || []), ...(rec.perk2 || [])]) {
+      const k = perkKey(p);
+      if (have.has(k) && !seenTrait.has(k)) { seenTrait.add(k); traitNames.push(p); }
+    }
+    // A perk1/perk2 god-roll trait that's available but not currently socketed = "can toggle".
+    const togglable = [n1, n2].some((n) => n && !socketed.has(perkKey(n)));
+    return {
+      p1: !!n1, p2: !!n2, barrel: !!nb, mag: !!nm, depth, togglable, traitNames,
+      names: { p1: n1, p2: n2, barrel: nb, mag: nm },
+    };
   }
 
   // The recommended perks a copy actually has, perk1/perk2 first (the god-roll traits).
@@ -549,13 +645,15 @@
     return [m?.names?.p1, m?.names?.p2].filter(Boolean);
   }
 
-  // For each weapon you own multiple copies of, pick the single best to KEEP
-  // (most recommended perks, then barrel/mag, then masterwork) and mark the rest
-  // as shard candidates.
+  // For each weapon you own multiple copies of, pick the best to KEEP (most recommended
+  // perks, then barrel/mag, then depth, then masterwork) and mark the rest as shard
+  // candidates. With keep-coverage on, also keep any extra copy that's your only source of
+  // a recommended trait perk the best copy can't roll.
   function computeRedundant() {
     redundant = new Map();
     keepers = new Set();
     keeperInfo = new Map();
+    keeperUnique = new Map();
     computeError = "";
     if (!vault.ready || !Object.keys(tierMap).length) return;
 
@@ -582,26 +680,57 @@
           const m = matchInfo(c.id, rec);
           const perkScore = (m.p1 ? 1 : 0) + (m.p2 ? 1 : 0);
           const masterwork = ((c.item.state || 0) & STATE_MASTERWORK) !== 0;
-          // perks dominate, then barrel/mag, then masterwork as a final tiebreak.
-          const composite = perkScore * 1000 + ((m.barrel ? 1 : 0) + (m.mag ? 1 : 0)) * 100 + (masterwork ? 1 : 0);
+          // Score order: column coverage (is it the god roll?) dominates, then barrel/mag
+          // coverage, then DEPTH (how many recommended options it can switch between — so a
+          // copy with both Demo and Rime beats one with just Rime), then masterwork.
+          // depth is capped so it can never outrank a barrel/mag column (max realistic depth
+          // is well under 10).
+          const composite =
+            perkScore * 1000 +
+            ((m.barrel ? 1 : 0) + (m.mag ? 1 : 0)) * 100 +
+            Math.min(m.depth, 9) * 10 +
+            (masterwork ? 1 : 0);
           return { id: c.id, item: c.item, m, perkScore, composite, locked: ((c.item.state || 0) & STATE_LOCKED) !== 0 };
         });
         let bestPerk = 0;
         for (const s of scored) if (s.perkScore > bestPerk) bestPerk = s.perkScore;
         if (bestPerk <= 0) continue; // no copy has a wanted perk
 
-        let keeper = scored[0];
-        for (const s of scored) if (s.composite > keeper.composite) keeper = s;
+        // The single best copy by composite is always the primary keeper.
+        const ranked = [...scored].sort((a, b) => b.composite - a.composite);
+        const primary = ranked[0];
 
-        // Flag every worse copy — including locked ones (this user locks junk to avoid
-        // accidental dismantles, then wants to decide). Lock state is surfaced, not hidden.
-        const flagged = scored.filter((s) => s.id !== keeper.id);
+        // Keep-coverage pass: also keep any copy that's your ONLY source of a recommended
+        // trait perk the kept set can't already roll (e.g. the only copy with Mega Kill Clip).
+        // Greedy, best-first, and bounded by the recommended pool — once every god-roll trait
+        // is covered, remaining copies are sharded. Toggle OFF → only the single best is kept.
+        const kept = [primary];
+        const covered = new Set(primary.m.traitNames.map((n) => perkKey(n)));
+        if (keepCoverage) {
+          for (const s of ranked.slice(1)) {
+            const adds = s.m.traitNames.filter((n) => !covered.has(perkKey(n)));
+            if (!adds.length) continue;
+            kept.push(s);
+            s.adds = adds; // the recommended perks only this copy brings — for the tooltip
+            for (const n of adds) covered.add(perkKey(n));
+          }
+        }
+
+        // Flag every copy we didn't keep — including locked ones (this user locks junk to
+        // avoid accidental dismantles, then wants to decide). Lock state is surfaced, not hidden.
+        const keptIds = new Set(kept.map((k) => k.id));
+        const flagged = scored.filter((s) => !keptIds.has(s.id));
         if (!flagged.length) continue;
 
-        keepers.add(keeper.id);
-        keeperInfo.set(keeper.id, keeper.m);
+        keepers.add(primary.id);
+        keeperInfo.set(primary.id, primary.m);
+        for (const s of kept.slice(1)) {
+          keepers.add(s.id);
+          keeperInfo.set(s.id, s.m);
+          keeperUnique.set(s.id, s.adds);
+        }
         for (const s of flagged) {
-          redundant.set(s.id, { name, count: copies.length, m: s.m, keep: keeper.m, locked: s.locked });
+          redundant.set(s.id, { name, count: copies.length, m: s.m, keep: primary.m, locked: s.locked });
         }
       }
       console.log(TAG, `Duplicates: ${keepers.size} keepers, ${redundant.size} shard candidates.`);
@@ -641,14 +770,6 @@
     }
   }
 
-  function setExclude(on) {
-    on = Boolean(on);
-    if (on === excludeExotics) return;
-    excludeExotics = on;
-    computeRedundant();
-    applyHighlights();
-  }
-
   // DIM search for the weapons that have a shardable copy (all copies match by
   // name; the worse ones are the outlined tiles within that filtered view).
   function buildRedundantQuery() {
@@ -663,8 +784,10 @@
 
   chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
     if (!msg) return;
-    if ("excludeExotics" in msg) setExclude(msg.excludeExotics); // sync with popup
+    if ("excludeExotics" in msg) excludeExotics = Boolean(msg.excludeExotics); // sync with popup
+    if ("keepCoverage" in msg) keepCoverage = Boolean(msg.keepCoverage); // sync with popup
     // Recompute on demand so we never depend on load-time ordering of vault vs tier list.
+    // (One pass per message — the block below already covers the exotics-toggle case.)
     if (vault.ready && Object.keys(tierMap).length) {
       computeRedundant();
       applyHighlights();
@@ -677,8 +800,11 @@
         counts: vault.ready ? tierCounts() : {},
         coverage: vault.ready ? coverage() : null,
         redundant: redundant.size,
+        keepers: keepers.size,
+        coverageKept: keeperUnique.size,
         highlightOn,
         excludeExotics,
+        keepCoverage,
       });
       return;
     }

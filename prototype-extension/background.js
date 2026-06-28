@@ -68,8 +68,12 @@ function buildFromTab(category, csv) {
   const iPerk1 = findCol(h, (s) => s.includes("perk 1"));
   const iPerk2 = findCol(h, (s) => s.includes("perk 2"));
   const iBarrel = findCol(h, (s) => s.includes("barrel"));
-  const iMag = findCol(h, (s) => s === "mag");
-  if (iName < 0 || iTier < 0) return [];
+  // Exact-ish match so a "Damage"/"Image" header can't be mistaken for the magazine
+  // column, while still accepting a "Magazine" header.
+  const iMag = findCol(h, (s) => s === "mag" || s === "magazine");
+  // A tab can list weapons with recommended perks but no Tier column at all (handled
+  // per-row below). Only a missing Name column makes the tab unusable.
+  if (iName < 0) return [];
 
   const cell = (row, i) => (i >= 0 ? (row[i] || "").trim() : "");
   const lines = (v) => v.split("\n").map((s) => s.trim()).filter(Boolean);

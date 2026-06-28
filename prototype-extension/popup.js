@@ -14,6 +14,9 @@ const COLOR = {
 const $ = (id) => document.getElementById(id);
 const status = (m) => ($("status").textContent = m);
 const excludeChecked = () => $("exclude").checked;
+const keepCoverageChecked = () => $("keep-coverage").checked;
+// Settings every message carries so the content script recomputes with the current toggles.
+const settings = () => ({ excludeExotics: excludeChecked(), keepCoverage: keepCoverageChecked() });
 
 // Promise wrappers (callback style works in both Firefox and Chromium).
 const getActiveTab = () =>
@@ -52,7 +55,7 @@ async function run(apply) {
   const tiers = selectedTiers();
   if (!tiers.length) return status("Pick at least one tier.");
   if (!tab) return status("Open DIM in this tab first.");
-  const resp = await sendToTab(tab.id, { type: "tierSearch", tiers, apply, excludeExotics: excludeChecked() });
+  const resp = await sendToTab(tab.id, { type: "tierSearch", tiers, apply, ...settings() });
   if (!resp) return status("No response — is DIM open and loaded?");
   if (!resp.ok) return status(resp.error || "Vault still loading…");
   if (!resp.count) return status("No owned weapons in those tiers.");
@@ -113,7 +116,7 @@ async function toggleRedundant() {
   const resp = await sendToTab(tab.id, {
     type: "highlightRedundant",
     on: $("redundant").checked,
-    excludeExotics: excludeChecked(),
+    ...settings(),
   });
   if (!resp) return status("No response — is DIM open and loaded?");
   setRedundantPill(resp.redundant);
@@ -122,7 +125,7 @@ async function toggleRedundant() {
 
 async function runRedundant(apply) {
   if (!tab) return status("Open DIM first.");
-  const resp = await sendToTab(tab.id, { type: "redundantSearch", apply, excludeExotics: excludeChecked() });
+  const resp = await sendToTab(tab.id, { type: "redundantSearch", apply, ...settings() });
   if (!resp) return status("No response — is DIM open and loaded?");
   if (!resp.instances) return status("No redundant rolls found.");
   if (apply) {
@@ -159,23 +162,26 @@ async function armorSearch(preset, apply) {
 
 async function refresh() {
   if (!tab) return;
-  applyCounts(await sendToTab(tab.id, { type: "tierCounts", excludeExotics: excludeChecked() }));
+  applyCounts(await sendToTab(tab.id, { type: "tierCounts", ...settings() }));
 }
 
 async function init() {
   tab = await getActiveTab();
-  const resp = tab && (await sendToTab(tab.id, { type: "tierCounts", excludeExotics: excludeChecked() }));
+  const resp = tab && (await sendToTab(tab.id, { type: "tierCounts", ...settings() }));
   if (!resp) {
     status("Open DIM to use this.");
     renderTiers({});
     return;
   }
+  // Reflect the content script's actual toggle state (default on) in the checkbox.
+  if (typeof resp.keepCoverage === "boolean") $("keep-coverage").checked = resp.keepCoverage;
   applyCounts(resp);
 }
 
 $("apply").addEventListener("click", () => run(true));
 $("copy").addEventListener("click", () => run(false));
 $("exclude").addEventListener("change", refresh);
+$("keep-coverage").addEventListener("change", refresh);
 $("redundant").addEventListener("change", toggleRedundant);
 $("redundant-apply").addEventListener("click", () => runRedundant(true));
 $("redundant-copy").addEventListener("click", () => runRedundant(false));
