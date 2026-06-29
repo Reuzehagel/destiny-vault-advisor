@@ -15,14 +15,20 @@ Generate a DIM wishlist from the sheet, and split responsibilities cleanly:
 - **Wishlist = the static "which rolls are good" layer** → delegate to DIM (highlighting, search, persistence). This lets the in-page perk-glow injection eventually be **retired** — the same "delegate to DIM's own mechanism" call that removed the armor-cleanup presets.
 - **The engine = the dynamic "given MY copies, what do I do" layer** (`keepshard.js`) → the part only the extension can do. Kept.
 
-Generation is a **pure module** (`wishlist.js`), paired 1:1 with a test, matching the seams in [ADR-0001](0001-pure-module-seams.md): sheet entries + two injected lookups (`weaponHashes(normName)`, `plugHashes(perkName)`) → wishlist text + coverage stats. It never fetches a manifest or touches the DOM; the caller supplies the lookups, so the same generator serves any delivery path.
+Generation is a **pure module** (`wishlist.js`), paired 1:1 with a test, matching the seams in [ADR-0001](0001-pure-module-seams.md): sheet entries + two injected lookups (`weaponHashes(normName)`, `weaponPlugs(weaponHash)`) → wishlist text + coverage stats. `buildLookups(itemTable, plugSetTable)` derives the lookups from DIM's manifest; it never fetches or touches the DOM, so the same generator serves any delivery path.
 
 Matching rules:
 
-- **Traits only.** DIM's `perks=` is an AND, so "perk1 ∈ {A,B} and perk2 ∈ {C,D}" expands to the cartesian product of the two trait columns — one `dimwishlist:item=<hash>&perks=<a>,<b>` line each. **Barrel/mag are excluded from the match**: they're secondary, and pinning a specific one would make an otherwise-great roll miss the list. (The engine still scores them.)
-- **Base + enhanced** plug hashes are both emitted per perk, so crafted/enhanced rolls match.
+- **Trait cartesian, with a barrel/mag mode.** DIM's `perks=` is an AND, so "perk1 ∈ {A,B} and perk2 ∈ {C,D}" expands to the cartesian product of the two trait columns. A `mode` (set on the Wishlist tab) decides how barrel/mag factor in: `traits` (traits only — broadest, but DIM won't highlight a barrel/mag), or `full` (default — trait × trait × barrel × mag, so the matched roll carries the barrel/mag and DIM highlights all four; only complete rolls match). Barrel/mag resolve per-weapon like traits.
+
+  A third `secondary` mode was tried and **dropped**: it emitted a traits-only line (to flag broadly) plus separate `traits+barrel` / `traits+mag` lines (to highlight each when present). It doesn't work — **DIM highlights only the simplest matching roll, not the union of all matching lines**, so the barrel/mag lines never lit up (confirmed live: full roll highlights barrels, secondary did not). The broad-flag-*and*-highlight-secondaries goal is simply not expressible in the wishlist format.
+- **Resolve perks PER WEAPON, non-enhanced.** Each cited hash is taken from that specific weapon's own plug sets (`socketEntries[].randomizedPlugSetHash` / `reusablePlugSetHash` → `PlugSet.reusablePlugItems[].plugItemHash`, `currentlyCanRoll`), so it's guaranteed valid on the item. We keep the **non-enhanced** variant — DIM normalizes enhanced itself and rejects enhanced hashes. Base and enhanced share the same display NAME, so enhanced is detected by `itemTypeDisplayName` (`"Enhanced Trait"` vs `"Trait"`), never the name.
 - **Tier rides in `//notes:`** (`//notes:Tier S. …`), so `wishlistnotes:S` works in DIM. The block format mirrors the author's hand-made list (`// name`, `//notes:`, then `dimwishlist:` lines).
-- **Coverage stats** report which weapon/perk names didn't resolve to a manifest hash — the name→hash join is the risky part (reissues, craftable vs world copies), and silent misses must be visible.
+- **Coverage stats** report perk names that resolve on **no** weapon (sheet ↔ manifest name drift) and weapons with no rollable recommended combo — these must be visible, never silent.
+
+### Correction (why per-weapon)
+
+An earlier version of this ADR claimed a global name→hash map was safe because "a line citing a hash a weapon can't roll simply never matches (a dead line)." **That was wrong.** DIM *validates* every cited hash against the item and flags the invalid ones loudly (a wall of red ⚠). A perk *name* is also ambiguous in the manifest — "Demolitionist" is a weapon trait **and** its enhanced twin **and** a ghost mod **and** an armor archetype, each a different hash. Citing all of them produced mostly-invalid rolls. The per-weapon resolution above is the fix: only hashes a weapon genuinely rolls are cited, so over-inclusion is self-correcting (no plug set → no line) instead of invalid.
 
 ### Delivery
 
@@ -43,6 +49,6 @@ Both halves ship:
 - **+** The "good roll" layer becomes native DIM (every view, searchable, persistent); the fragile in-page perk highlighting can be retired.
 - **+** Sharpens the product's identity: the extension is *the advisor a wishlist can't be*; the wishlist is the shareable artifact.
 - **+** `wishlist.js` is pure and tested like the other seams; one generator serves both delivery paths.
-- **−** name→hash resolution is a new failure surface (reissues, craftable vs world copies); a wrong/missing hash silently fails to match. Mitigated by coverage stats, not eliminated.
-- **−** AND-only `perks=` means real line-count blow-up (per weapon: reissues × |perk1| × |perk2| × enhanced variants); whole-sheet output is thousands of lines — normal for wishlists.
+- **−** Resolution leans on the `PlugSet` manifest table (DIM caches it) plus each weapon's socket plug sets; a perk the manifest names differently than the sheet won't match. Surfaced by coverage stats (unmatched perks/weapons), not eliminated.
+- **−** Output is still large (per weapon: reissues × |perk1| × |perk2|), but far smaller than a name-based expansion — each perk resolves to a single non-enhanced hash, not base × enhanced × every same-named plug.
 - **−** Path B, if taken, adds a Bungie API key + CI + hosting.

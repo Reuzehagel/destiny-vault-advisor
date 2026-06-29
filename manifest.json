@@ -16,7 +16,7 @@
   "content_scripts": [
     {
       "matches": ["https://app.destinyitemmanager.com/*", "https://beta.destinyitemmanager.com/*"],
-      "js": ["naming.js", "keepshard.js", "dimvault.js", "render.js", "content.js"],
+      "js": ["naming.js", "keepshard.js", "dimvault.js", "render.js", "wishlist.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

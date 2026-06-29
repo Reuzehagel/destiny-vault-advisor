@@ -1,13 +1,14 @@
 /**
- * Toolbar popup — one composable filter, one action.
+ * Toolbar popup — two tabs.
  *
- * Tiers AND an optional "only weapons with dupes" toggle intersect into a single DIM
- * search; "Apply to DIM" commits it, "Copy query" copies it. Highlight is a live tile
- * overlay; keep-coverage + the protect tags are rules that define what counts as shardable.
+ * Advisor: one composable filter (tiers ∩ "only weapons with dupes") into a single DIM
+ * search, plus the live tile highlight and the keep/shard rules. Vault-scoped.
  *
- * The popup holds no vault data — every control change pings the content script (which has
- * the vault + tier map in memory) for a fresh summary, and the action buttons ask it to
- * build/apply the query.
+ * Wishlist: the whole tier sheet → a DIM wishlist file (Download / Copy), scoped by tier and
+ * by how barrels/mags factor in. Not vault-scoped — it covers every weapon on the sheet.
+ *
+ * The popup holds no vault data — it asks the content script (which has the vault + tier map +
+ * manifest access) to compute summaries, queries, and the wishlist text.
  */
 const TIERS = ["S", "A", "B", "C", "D", "E", "F"];
 const COLOR = {
@@ -18,20 +19,17 @@ const COLOR = {
 const $ = (id) => document.getElementById(id);
 const status = (m) => ($("status").textContent = m || "");
 
-// Popup-local control state. dupesOnly/highlight start off; the rest are reflected from the
-// content script on init (it persists them across popup opens).
 const state = {
-  exclude: false,
-  dupesOnly: false,
-  highlight: false,
-  keepCoverage: true,
-  protectTags: new Set(),
-  protectNote: "",
+  // advisor
+  exclude: false, dupesOnly: false, highlight: false, keepCoverage: true,
+  protectTags: new Set(), protectNote: "",
+  // wishlist (independent of the advisor scope)
+  wlTiers: new Set(), wlMode: "full",
 };
 
 const selectedTiers = () => [...document.querySelectorAll("#tiers input:checked")].map((i) => i.value);
 
-// Everything the content script needs to recompute against the current toggles.
+// Advisor recompute settings — carried on every advisor message.
 const settings = () => ({
   excludeExotics: state.exclude,
   keepCoverage: state.keepCoverage,
@@ -51,8 +49,16 @@ const sendToTab = (tabId, msg) =>
 
 let tab = null;
 
+// --- tabs ------------------------------------------------------------------
+function setTab(name) {
+  for (const t of document.querySelectorAll(".tab")) t.classList.toggle("active", t.dataset.tab === name);
+  $("panel-advisor").hidden = name !== "advisor";
+  $("panel-wishlist").hidden = name !== "wishlist";
+}
+
+// --- advisor ---------------------------------------------------------------
 function renderTiers(counts) {
-  const keep = new Set(selectedTiers()); // preserve selection across re-render
+  const keep = new Set(selectedTiers());
   const wrap = $("tiers");
   wrap.innerHTML = "";
   const max = Math.max(1, ...TIERS.map((g) => counts?.[g] || 0));
@@ -72,11 +78,8 @@ function renderTiers(counts) {
   }
 }
 
-function setSwitch(id, on) {
-  $(id).classList.toggle("on", Boolean(on));
-}
+const setSwitch = (id, on) => $(id).classList.toggle("on", Boolean(on));
 
-// Mirror state into the custom controls (switches, badges, note) — used on init.
 function reflectControls() {
   setSwitch("exclude", state.exclude);
   setSwitch("dupes-only", state.dupesOnly);
@@ -87,12 +90,10 @@ function reflectControls() {
 }
 
 function setSummary(weapons, shardable) {
-  $("summary-match").textContent =
-    weapons == null ? "—" : `${weapons} weapon${weapons === 1 ? "" : "s"} match`;
+  $("summary-match").textContent = weapons == null ? "—" : `${weapons} weapon${weapons === 1 ? "" : "s"} match`;
   $("summary-shard").textContent = shardable == null ? "—" : `${shardable} shardable`;
 }
 
-// Live poll behind every toggle: refresh the tier bars + summary, re-paint tile highlights.
 async function sync() {
   if (!tab) return;
   const resp = await sendToTab(tab.id, { type: "sync", ...settings() });
@@ -107,7 +108,6 @@ async function run(apply) {
   const resp = await sendToTab(tab.id, { type: "apply", apply, ...settings() });
   if (!resp) return status("No response — is DIM open and loaded?");
   if (!resp.ok) return status(resp.error || "Vault still loading…");
-
   if (apply) {
     if (!resp.query) return status("Applied — cleared filter (everything).");
     status(resp.applied ? `Applied — ${resp.weapons} weapons.` : "Couldn't find DIM's search box.");
@@ -122,7 +122,6 @@ async function run(apply) {
   }
 }
 
-// A switch bound to a boolean state key: flip on click, then re-sync.
 function bindSwitch(id, key) {
   $(id).addEventListener("click", () => {
     state[key] = !state[key];
@@ -131,6 +130,41 @@ function bindSwitch(id, key) {
   });
 }
 
+// --- wishlist --------------------------------------------------------------
+let wlBusy = false; // a generate reads the multi-MB manifest; don't stack concurrent runs
+
+async function wishlist(download) {
+  const cov = $("wl-cov");
+  if (!tab) { cov.textContent = "Open DIM in this tab first."; return; }
+  if (wlBusy) return;
+  wlBusy = true;
+  cov.textContent = "Generating… (reading the manifest)";
+  try {
+    const resp = await sendToTab(tab.id, { type: "wishlist", tiers: [...state.wlTiers], mode: state.wlMode });
+    if (!resp) { cov.textContent = "No response — is DIM open and loaded?"; return; }
+    if (!resp.ok) { cov.textContent = resp.error || "Couldn't build the wishlist."; return; }
+
+    const { text, stats } = resp;
+    if (download) {
+      const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `vault-advisor-wishlist-${state.wlTiers.size ? [...state.wlTiers].join("").toLowerCase() : "all"}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      try { await navigator.clipboard.writeText(text); } catch { console.log(text); }
+    }
+
+    const unmatched = stats.unmatchedWeapons.length + stats.unmatchedPerks.length;
+    cov.textContent = `${stats.weapons} weapons · ${stats.lines} rolls${unmatched ? ` · ${unmatched} unmatched` : ""}`;
+    if (unmatched) console.log("Wishlist unmatched:", stats.unmatchedWeapons, stats.unmatchedPerks);
+  } finally {
+    wlBusy = false;
+  }
+}
+
+// --- init ------------------------------------------------------------------
 async function init() {
   tab = await getActiveTab();
   const resp = tab && (await sendToTab(tab.id, { type: "sync", ...settings() }));
@@ -139,7 +173,6 @@ async function init() {
     renderTiers({});
     return;
   }
-  // Adopt the content script's persisted flags (dupesOnly is popup-local, stays off).
   state.exclude = Boolean(resp.excludeExotics);
   state.keepCoverage = resp.keepCoverage !== false;
   state.highlight = Boolean(resp.highlightOn);
@@ -151,6 +184,8 @@ async function init() {
   if (!resp.ready) status("Vault still loading in DIM…");
 }
 
+for (const t of document.querySelectorAll(".tab")) t.addEventListener("click", () => setTab(t.dataset.tab));
+
 bindSwitch("exclude", "exclude");
 bindSwitch("dupes-only", "dupesOnly");
 bindSwitch("highlight", "highlight");
@@ -158,17 +193,32 @@ bindSwitch("keep-coverage", "keepCoverage");
 for (const b of document.querySelectorAll(".badge")) {
   b.addEventListener("click", () => {
     const tag = b.dataset.tag;
-    if (state.protectTags.has(tag)) state.protectTags.delete(tag);
-    else state.protectTags.add(tag);
+    state.protectTags.has(tag) ? state.protectTags.delete(tag) : state.protectTags.add(tag);
     b.classList.toggle("on", state.protectTags.has(tag));
     sync();
   });
 }
 // 'change' (blur/enter), not 'input' — avoid recomputing the whole vault on every keystroke.
-$("protect-note").addEventListener("change", () => {
-  state.protectNote = $("protect-note").value.trim();
-  sync();
-});
+$("protect-note").addEventListener("change", () => { state.protectNote = $("protect-note").value.trim(); sync(); });
 $("apply").addEventListener("click", () => run(true));
 $("copy").addEventListener("click", () => run(false));
+
+// wishlist controls — colour the chips from the one COLOR map (no duplicated hexes in HTML)
+for (const c of document.querySelectorAll("#wl-tiers .chip")) {
+  c.style.background = COLOR[c.dataset.tier];
+  c.addEventListener("click", () => {
+    const g = c.dataset.tier;
+    state.wlTiers.has(g) ? state.wlTiers.delete(g) : state.wlTiers.add(g);
+    c.classList.toggle("on", state.wlTiers.has(g));
+  });
+}
+for (const o of document.querySelectorAll("#wl-mode .opt")) {
+  o.addEventListener("click", () => {
+    state.wlMode = o.dataset.mode;
+    for (const x of document.querySelectorAll("#wl-mode .opt")) x.classList.toggle("sel", x === o);
+  });
+}
+$("wl-download").addEventListener("click", () => wishlist(true));
+$("wl-copy").addEventListener("click", () => wishlist(false));
+
 init();

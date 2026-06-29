@@ -635,6 +635,44 @@
     }
   }
 
+  // Read one of DIM's full manifest tables from the keyval source. dimvault.loadVault keeps
+  // only owned defs; a whole-sheet wishlist needs the full InventoryItem + PlugSet tables to
+  // resolve each weapon's rollable perks, so we read them on demand (an explicit user action)
+  // and let them go once indexed.
+  async function readTable(source, keys, name) {
+    // Exact key first, then a loose contains-match — mirrors dimvault.js, so a versioned/renamed
+    // DIM key still resolves instead of failing only on the wishlist path.
+    const key = keys.find((k) => k === `d2-manifest-${name}`) || keys.find((k) => k.includes(name));
+    if (!key) throw new Error(`${name} manifest not cached yet — let DIM finish loading once.`);
+    const table = await source.get(key);
+    if (!table) throw new Error(`${name} manifest is empty — let DIM finish loading once.`);
+    return table;
+  }
+
+  // Generate a DIM wishlist from the tier sheet, scoped to the selected grades (empty = all,
+  // including untiered weapons that still carry recommended perks). Pure generation lives in
+  // wishlist.js; here we only supply the sheet entries and the manifest-backed lookups.
+  async function generateWishlist(tiers, mode) {
+    const engine = globalThis.VaultAdvisor;
+    if (!engine || !engine.buildWishlist || !engine.buildLookups) throw new Error("wishlist.js not loaded");
+    if (!Object.keys(tierMap).length) throw new Error("tier sheet not loaded yet");
+    const want = new Set(tiers);
+    const entries = Object.values(tierMap).filter((e) => !want.size || want.has(e.tier));
+    const source = await openKeyvalSource();
+    let itemTable, plugSetTable;
+    try {
+      const keys = await source.allKeys();
+      [itemTable, plugSetTable] = await Promise.all([
+        readTable(source, keys, "InventoryItem"),
+        readTable(source, keys, "PlugSet"),
+      ]);
+    } finally {
+      source.close();
+    }
+    const { text, stats } = engine.buildWishlist(entries, engine.buildLookups(itemTable, plugSetTable), mode);
+    return { ok: true, text, stats };
+  }
+
   chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
     if (!msg) return;
     // Every message carries the popup's current settings; adopt them before recomputing.
@@ -643,8 +681,9 @@
     if ("protectTags" in msg) protectTags = new Set(Array.isArray(msg.protectTags) ? msg.protectTags : []);
     if ("protectNote" in msg) protectNote = String(msg.protectNote || "");
     if ("highlight" in msg) highlightOn = Boolean(msg.highlight); // live overlay, set by its own switch
-    // Recompute on demand so we never depend on load-time ordering of vault vs tier list.
-    if (vault.ready && Object.keys(tierMap).length) {
+    // Recompute on demand so we never depend on load-time ordering of vault vs tier list. The
+    // wishlist path reads neither keep/shard verdicts nor tiles, so skip the recompute + repaint.
+    if (msg.type !== "wishlist" && vault.ready && Object.keys(tierMap).length) {
       computeRedundant();
       applyHighlights();
     }
@@ -678,6 +717,14 @@
       const applied = msg.apply ? setDimSearch(f.query) : false;
       respond({ ok: true, query: f.query, weapons: f.weapons, shardable: f.shardable, applied });
       return;
+    }
+    // wishlist: build a DIM wishlist from the sheet, scoped to the selected tiers. Async
+    // (reads the multi-MB manifest), so respond later and keep the channel open with `true`.
+    if (msg.type === "wishlist") {
+      generateWishlist(msg.tiers || [], msg.mode)
+        .then(respond)
+        .catch((e) => respond({ ok: false, error: String(e && e.message ? e.message : e) }));
+      return true;
     }
   });
 
