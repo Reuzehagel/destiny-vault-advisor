@@ -103,7 +103,7 @@
   // entirely (engine role "protected"), so a roll you keep for PvP/a build is never advised
   // away. Tag/note DATA comes from the vault (dimvault.js); this is the POLICY that reads it,
   // kept next to the scoring call. Configured in the popup; defaults mirror the popup HTML.
-  let protectTags = new Set(["favorite", "keep"]);
+  let protectTags = new Set(); // none protected by default; user opts in via the popup
   let protectNote = ""; // comma-separated keywords; empty = ignore notes
 
   /** In-memory index, loaded from IndexedDB by dimvault.js. Replaced wholesale on load;
@@ -466,13 +466,37 @@
     return { ownedWeapons: seen.size, matched, unmatched: [...unmatched].sort() };
   }
 
-  // Build a DIM search matching owned weapons in the selected tiers.
-  function buildTierQuery(grades) {
-    const want = new Set(grades);
-    const names = new Set();
-    for (const { name, grade } of ownedTiered()) if (want.has(grade)) names.add(name);
-    const list = [...names];
-    return { query: redundantQuery(list), count: list.length };
+  // The one composable filter: a tier constraint AND an optional "has a shardable copy"
+  // constraint, intersected. Empty tiers = no tier constraint; dupesOnly off = no dupe
+  // constraint; both empty = everything (empty query clears DIM's search). Returns the DIM
+  // name-OR query plus the live summary the popup shows (weapons matched, shardable copies
+  // within them). Highlight is a separate live overlay — not part of the query.
+  function buildFilterQuery(grades, dupesOnly) {
+    const want = new Set(grades || []);
+    // names: a Set restricts the match; null means "unconstrained" (everything).
+    let names = null;
+    if (want.size) {
+      names = new Set();
+      for (const { name, grade } of ownedTiered()) if (want.has(grade)) names.add(name);
+    }
+    if (dupesOnly) {
+      // Every shard-role weapon is tier-listed (computeRedundant needs its perks), so a
+      // weapon with a shardable copy is always a valid intersection candidate.
+      const dupe = new Set();
+      for (const vd of verdictById.values()) if (vd.role === "shard") dupe.add(vd.name);
+      names = names ? new Set([...names].filter((n) => dupe.has(n))) : dupe;
+    }
+    // Shardable copies within the matched set (all of them when unconstrained).
+    let shardable = 0;
+    for (const vd of verdictById.values()) {
+      if (vd.role === "shard" && (!names || names.has(vd.name))) shardable++;
+    }
+    const list = names ? [...names] : [];
+    return {
+      query: names ? redundantQuery(list) : "",
+      weapons: names ? list.length : coverage().ownedWeapons,
+      shardable,
+    };
   }
 
   // React owns DIM's search box value, so we write through the native setter to make
@@ -490,15 +514,6 @@
     input.focus();
     return true;
   }
-
-  // Armor cleanup presets. We delegate the hard Armor 3.0 logic (tier, set-aware
-  // stat dominance) to DIM's own search filters and just apply the query — DIM
-  // keeps these correct as the sandbox changes. tier:<=3 also sweeps legacy
-  // (pre-Edge-of-Fate) armor, which reads as tier 0.
-  const ARMOR_QUERIES = {
-    lowtier: "is:armor -is:exotic -is:locked tier:<=3",
-    dupes: "is:armor -is:exotic -is:locked dupe:setbonus+statlower",
-  };
 
   // --- Duplicate rolls: which copy to keep ----------------------------------
   // Scoring lives in keepshard.js (globalThis.VaultAdvisor.rankGroup) — a pure module
@@ -620,44 +635,31 @@
     }
   }
 
-  // DIM search for the weapons that have a shardable (red) copy — coverage (yellow) copies
-  // are your call, not a shard recommendation, so they're excluded. All copies match by
-  // name; the red ones are the outlined tiles within that filtered view.
-  function buildRedundantQuery() {
-    const names = new Set();
-    let instances = 0;
-    for (const vd of verdictById.values()) {
-      if (vd.role !== "shard") continue;
-      names.add(vd.name);
-      instances++;
-    }
-    const list = [...names];
-    return { query: redundantQuery(list), weapons: list.length, instances };
-  }
-
   chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
     if (!msg) return;
-    if ("excludeExotics" in msg) excludeExotics = Boolean(msg.excludeExotics); // sync with popup
-    if ("keepCoverage" in msg) keepCoverage = Boolean(msg.keepCoverage); // sync with popup
+    // Every message carries the popup's current settings; adopt them before recomputing.
+    if ("excludeExotics" in msg) excludeExotics = Boolean(msg.excludeExotics);
+    if ("keepCoverage" in msg) keepCoverage = Boolean(msg.keepCoverage);
     if ("protectTags" in msg) protectTags = new Set(Array.isArray(msg.protectTags) ? msg.protectTags : []);
     if ("protectNote" in msg) protectNote = String(msg.protectNote || "");
+    if ("highlight" in msg) highlightOn = Boolean(msg.highlight); // live overlay, set by its own switch
     // Recompute on demand so we never depend on load-time ordering of vault vs tier list.
-    // (One pass per message — the block below already covers the exotics-toggle case.)
     if (vault.ready && Object.keys(tierMap).length) {
       computeRedundant();
       applyHighlights();
     }
 
-    if (msg.type === "tierCounts") {
+    // sync: live poll behind every popup toggle — returns the tier bars, the filter summary
+    // (weapons matched + shardable within them) for the current tiers/dupesOnly, and the
+    // persisted flags so the popup can reflect them.
+    if (msg.type === "sync") {
+      const f = vault.ready ? buildFilterQuery(msg.tiers || [], Boolean(msg.dupesOnly)) : { weapons: 0, shardable: 0 };
       respond({
         ok: vault.ready,
         ready: vault.ready,
         counts: vault.ready ? tierCounts() : {},
-        coverage: vault.ready ? coverage() : null,
-        redundant: roleCount("shard"),
-        keepers: roleCount("keeper"),
-        coverageKept: roleCount("coverage"),
-        protectedCount: roleCount("protected"),
+        weapons: f.weapons,
+        shardable: f.shardable,
         highlightOn,
         excludeExotics,
         keepCoverage,
@@ -666,37 +668,15 @@
       });
       return;
     }
-    if (msg.type === "highlightRedundant") {
-      highlightOn = Boolean(msg.on);
-      applyHighlights();
-      respond({ ok: true, redundant: roleCount("shard"), highlightOn });
-      return;
-    }
-    if (msg.type === "tierSearch") {
+    // apply: build the combined query and (when apply) write it into DIM's search box.
+    if (msg.type === "apply") {
       if (!vault.ready) {
         respond({ ok: false, error: "vault not loaded yet" });
         return;
       }
-      const { query, count } = buildTierQuery(msg.tiers || []);
-      const applied = msg.apply ? setDimSearch(query) : false;
-      respond({ ok: true, count, query, applied });
-      return;
-    }
-    if (msg.type === "redundantSearch") {
-      const { query, weapons, instances } = buildRedundantQuery();
-      let applied = false;
-      if (msg.apply && query) {
-        applied = setDimSearch(query);
-        highlightOn = true; // outline the worse copies within the filtered view
-        applyHighlights();
-      }
-      respond({ ok: true, query, weapons, instances, applied, highlightOn });
-      return;
-    }
-    if (msg.type === "armorSearch") {
-      const query = ARMOR_QUERIES[msg.preset] || "";
-      const applied = msg.apply && query ? setDimSearch(query) : false;
-      respond({ ok: Boolean(query), query, applied });
+      const f = buildFilterQuery(msg.tiers || [], Boolean(msg.dupesOnly));
+      const applied = msg.apply ? setDimSearch(f.query) : false;
+      respond({ ok: true, query: f.query, weapons: f.weapons, shardable: f.shardable, applied });
       return;
     }
   });

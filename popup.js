@@ -1,9 +1,13 @@
 /**
- * Toolbar popup — pick tiers, build a DIM search of your owned weapons in those
- * tiers, and apply it to (or copy it from) the DIM tab.
+ * Toolbar popup — one composable filter, one action.
  *
- * The popup holds no data; it asks the content script (which has the vault +
- * tier map in memory) to compute counts and the query.
+ * Tiers AND an optional "only weapons with dupes" toggle intersect into a single DIM
+ * search; "Apply to DIM" commits it, "Copy query" copies it. Highlight is a live tile
+ * overlay; keep-coverage + the protect tags are rules that define what counts as shardable.
+ *
+ * The popup holds no vault data — every control change pings the content script (which has
+ * the vault + tier map in memory) for a fresh summary, and the action buttons ask it to
+ * build/apply the query.
  */
 const TIERS = ["S", "A", "B", "C", "D", "E", "F"];
 const COLOR = {
@@ -12,20 +16,32 @@ const COLOR = {
 };
 
 const $ = (id) => document.getElementById(id);
-const status = (m) => ($("status").textContent = m);
-const excludeChecked = () => $("exclude").checked;
-const keepCoverageChecked = () => $("keep-coverage").checked;
-const selectedProtectTags = () => [...document.querySelectorAll(".ptag:checked")].map((i) => i.value);
-const protectNoteVal = () => $("protect-note").value.trim();
-// Settings every message carries so the content script recomputes with the current toggles.
+const status = (m) => ($("status").textContent = m || "");
+
+// Popup-local control state. dupesOnly/highlight start off; the rest are reflected from the
+// content script on init (it persists them across popup opens).
+const state = {
+  exclude: false,
+  dupesOnly: false,
+  highlight: false,
+  keepCoverage: true,
+  protectTags: new Set(),
+  protectNote: "",
+};
+
+const selectedTiers = () => [...document.querySelectorAll("#tiers input:checked")].map((i) => i.value);
+
+// Everything the content script needs to recompute against the current toggles.
 const settings = () => ({
-  excludeExotics: excludeChecked(),
-  keepCoverage: keepCoverageChecked(),
-  protectTags: selectedProtectTags(),
-  protectNote: protectNoteVal(),
+  excludeExotics: state.exclude,
+  keepCoverage: state.keepCoverage,
+  protectTags: [...state.protectTags],
+  protectNote: state.protectNote,
+  highlight: state.highlight,
+  dupesOnly: state.dupesOnly,
+  tiers: selectedTiers(),
 });
 
-// Promise wrappers (callback style works in both Firefox and Chromium).
 const getActiveTab = () =>
   new Promise((res) => chrome.tabs.query({ active: true, currentWindow: true }, (t) => res(t[0])));
 const sendToTab = (tabId, msg) =>
@@ -36,6 +52,7 @@ const sendToTab = (tabId, msg) =>
 let tab = null;
 
 function renderTiers(counts) {
+  const keep = new Set(selectedTiers()); // preserve selection across re-render
   const wrap = $("tiers");
   wrap.innerHTML = "";
   const max = Math.max(1, ...TIERS.map((g) => counts?.[g] || 0));
@@ -43,36 +60,61 @@ function renderTiers(counts) {
     const n = counts?.[g] || 0;
     const pct = Math.round((n / max) * 100);
     const label = document.createElement("label");
-    label.className = "tier";
+    label.className = "row";
     label.title = `${n} ${g}-tier weapon${n === 1 ? "" : "s"}`;
     label.innerHTML = `
-      <input type="checkbox" value="${g}" ${n ? "" : "disabled"} />
+      <input type="checkbox" value="${g}" ${n ? "" : "disabled"} ${keep.has(g) && n ? "checked" : ""} />
       <span class="grade" style="background:${COLOR[g]}">${g}</span>
-      <span class="bar"><i style="width:${pct}%;background:${COLOR[g]}"></i></span>
+      <span class="bar"><i style="width:${pct}%"></i></span>
       <span class="count">${n}</span>`;
+    label.querySelector("input").addEventListener("change", sync);
     wrap.appendChild(label);
   }
 }
 
-function selectedTiers() {
-  return [...document.querySelectorAll('#tiers input:checked')].map((i) => i.value);
+function setSwitch(id, on) {
+  $(id).classList.toggle("on", Boolean(on));
+}
+
+// Mirror state into the custom controls (switches, badges, note) — used on init.
+function reflectControls() {
+  setSwitch("exclude", state.exclude);
+  setSwitch("dupes-only", state.dupesOnly);
+  setSwitch("highlight", state.highlight);
+  setSwitch("keep-coverage", state.keepCoverage);
+  for (const b of document.querySelectorAll(".badge")) b.classList.toggle("on", state.protectTags.has(b.dataset.tag));
+  $("protect-note").value = state.protectNote;
+}
+
+function setSummary(weapons, shardable) {
+  $("summary-match").textContent =
+    weapons == null ? "—" : `${weapons} weapon${weapons === 1 ? "" : "s"} match`;
+  $("summary-shard").textContent = shardable == null ? "—" : `${shardable} shardable`;
+}
+
+// Live poll behind every toggle: refresh the tier bars + summary, re-paint tile highlights.
+async function sync() {
+  if (!tab) return;
+  const resp = await sendToTab(tab.id, { type: "sync", ...settings() });
+  if (!resp) return status("Open DIM to use this.");
+  renderTiers(resp.counts || {});
+  setSummary(resp.weapons, resp.shardable);
+  status(resp.ready ? "" : "Vault still loading in DIM…");
 }
 
 async function run(apply) {
-  const tiers = selectedTiers();
-  if (!tiers.length) return status("Pick at least one tier.");
   if (!tab) return status("Open DIM in this tab first.");
-  const resp = await sendToTab(tab.id, { type: "tierSearch", tiers, apply, ...settings() });
+  const resp = await sendToTab(tab.id, { type: "apply", apply, ...settings() });
   if (!resp) return status("No response — is DIM open and loaded?");
   if (!resp.ok) return status(resp.error || "Vault still loading…");
-  if (!resp.count) return status("No owned weapons in those tiers.");
 
   if (apply) {
-    status(resp.applied ? `Applied — ${resp.count} weapons.` : "Couldn't find DIM's search box.");
+    if (!resp.query) return status("Applied — cleared filter (everything).");
+    status(resp.applied ? `Applied — ${resp.weapons} weapons.` : "Couldn't find DIM's search box.");
   } else {
     try {
       await navigator.clipboard.writeText(resp.query);
-      status(`Copied query — ${resp.count} weapons.`);
+      status(resp.query ? `Copied query — ${resp.weapons} weapons.` : "Nothing to copy (no filter).");
     } catch {
       status("Clipboard blocked; query in console.");
       console.log(resp.query);
@@ -80,129 +122,53 @@ async function run(apply) {
   }
 }
 
-let unmatched = [];
-
-function setRedundantPill(n) {
-  const el = $("redundant-count");
-  el.textContent = `${n ?? 0} to shard`;
-  el.classList.toggle("zero", !n);
-}
-
-function applyCounts(resp) {
-  renderTiers(resp?.counts || {});
-  setRedundantPill(resp?.redundant);
-  $("redundant").checked = Boolean(resp?.highlightOn);
-  const cov = resp?.coverage;
-  unmatched = cov?.unmatched || [];
-  const el = $("coverage");
-  if (cov) {
-    el.innerHTML =
-      `<span class="big">${cov.matched}/${cov.ownedWeapons}</span> on tier list` +
-      (unmatched.length ? `<span class="sep">·</span>copy ${unmatched.length} unmatched` : "");
-    el.classList.toggle("clickable", unmatched.length > 0);
-  } else {
-    el.textContent = "";
-    el.classList.remove("clickable");
-  }
-  if (resp && !resp.ready) status("Vault still loading in DIM…");
-}
-
-async function copyUnmatched() {
-  if (!unmatched.length) return;
-  try {
-    await navigator.clipboard.writeText(unmatched.join("\n"));
-    status(`Copied ${unmatched.length} unmatched names.`);
-  } catch {
-    console.log(unmatched.join("\n"));
-    status("Unmatched names in console.");
-  }
-}
-
-async function toggleRedundant() {
-  if (!tab) return status("Open DIM first.");
-  const resp = await sendToTab(tab.id, {
-    type: "highlightRedundant",
-    on: $("redundant").checked,
-    ...settings(),
+// A switch bound to a boolean state key: flip on click, then re-sync.
+function bindSwitch(id, key) {
+  $(id).addEventListener("click", () => {
+    state[key] = !state[key];
+    setSwitch(id, state[key]);
+    sync();
   });
-  if (!resp) return status("No response — is DIM open and loaded?");
-  setRedundantPill(resp.redundant);
-  status($("redundant").checked ? `Highlighting ${resp.redundant} redundant rolls.` : "Highlighting off.");
-}
-
-async function runRedundant(apply) {
-  if (!tab) return status("Open DIM first.");
-  const resp = await sendToTab(tab.id, { type: "redundantSearch", apply, ...settings() });
-  if (!resp) return status("No response — is DIM open and loaded?");
-  if (!resp.instances) return status("No redundant rolls found.");
-  if (apply) {
-    $("redundant").checked = Boolean(resp.highlightOn);
-    status(resp.applied ? `${resp.weapons} weapons, ${resp.instances} shardable copies.` : "Couldn't find DIM's search box.");
-  } else {
-    try {
-      await navigator.clipboard.writeText(resp.query);
-      status(`Copied — ${resp.weapons} weapons.`);
-    } catch {
-      status("Clipboard blocked; query in console.");
-      console.log(resp.query);
-    }
-  }
-}
-
-async function armorSearch(preset, apply) {
-  if (!tab) return status("Open DIM first.");
-  const resp = await sendToTab(tab.id, { type: "armorSearch", preset, apply });
-  if (!resp) return status("No response — is DIM open and loaded?");
-  if (!resp.ok) return status("Unknown armor preset.");
-  if (apply) {
-    status(resp.applied ? "Applied armor filter to DIM." : "Couldn't find DIM's search box.");
-  } else {
-    try {
-      await navigator.clipboard.writeText(resp.query);
-      status("Copied armor query.");
-    } catch {
-      status("Clipboard blocked; query in console.");
-      console.log(resp.query);
-    }
-  }
-}
-
-async function refresh() {
-  if (!tab) return;
-  applyCounts(await sendToTab(tab.id, { type: "tierCounts", ...settings() }));
 }
 
 async function init() {
   tab = await getActiveTab();
-  const resp = tab && (await sendToTab(tab.id, { type: "tierCounts", ...settings() }));
+  const resp = tab && (await sendToTab(tab.id, { type: "sync", ...settings() }));
   if (!resp) {
     status("Open DIM to use this.");
     renderTiers({});
     return;
   }
-  // Reflect the content script's actual toggle state (default on) in the checkbox.
-  if (typeof resp.keepCoverage === "boolean") $("keep-coverage").checked = resp.keepCoverage;
-  // Reflect the protect skip-list state (defaults: favorite + keep).
-  if (Array.isArray(resp.protectTags)) {
-    for (const cb of document.querySelectorAll(".ptag")) cb.checked = resp.protectTags.includes(cb.value);
-  }
-  if (typeof resp.protectNote === "string") $("protect-note").value = resp.protectNote;
-  applyCounts(resp);
+  // Adopt the content script's persisted flags (dupesOnly is popup-local, stays off).
+  state.exclude = Boolean(resp.excludeExotics);
+  state.keepCoverage = resp.keepCoverage !== false;
+  state.highlight = Boolean(resp.highlightOn);
+  state.protectTags = new Set(resp.protectTags || []);
+  state.protectNote = resp.protectNote || "";
+  reflectControls();
+  renderTiers(resp.counts || {});
+  setSummary(resp.weapons, resp.shardable);
+  if (!resp.ready) status("Vault still loading in DIM…");
 }
 
+bindSwitch("exclude", "exclude");
+bindSwitch("dupes-only", "dupesOnly");
+bindSwitch("highlight", "highlight");
+bindSwitch("keep-coverage", "keepCoverage");
+for (const b of document.querySelectorAll(".badge")) {
+  b.addEventListener("click", () => {
+    const tag = b.dataset.tag;
+    if (state.protectTags.has(tag)) state.protectTags.delete(tag);
+    else state.protectTags.add(tag);
+    b.classList.toggle("on", state.protectTags.has(tag));
+    sync();
+  });
+}
+// 'change' (blur/enter), not 'input' — avoid recomputing the whole vault on every keystroke.
+$("protect-note").addEventListener("change", () => {
+  state.protectNote = $("protect-note").value.trim();
+  sync();
+});
 $("apply").addEventListener("click", () => run(true));
 $("copy").addEventListener("click", () => run(false));
-$("exclude").addEventListener("change", refresh);
-$("keep-coverage").addEventListener("change", refresh);
-for (const cb of document.querySelectorAll(".ptag")) cb.addEventListener("change", refresh);
-// 'change' (blur/enter), not 'input' — avoid recomputing the whole vault on every keystroke.
-$("protect-note").addEventListener("change", refresh);
-$("redundant").addEventListener("change", toggleRedundant);
-$("redundant-apply").addEventListener("click", () => runRedundant(true));
-$("redundant-copy").addEventListener("click", () => runRedundant(false));
-$("coverage").addEventListener("click", copyUnmatched);
-$("armor-lowtier-apply").addEventListener("click", () => armorSearch("lowtier", true));
-$("armor-lowtier-copy").addEventListener("click", () => armorSearch("lowtier", false));
-$("armor-dupes-apply").addEventListener("click", () => armorSearch("dupes", true));
-$("armor-dupes-copy").addEventListener("click", () => armorSearch("dupes", false));
 init();

@@ -17,7 +17,7 @@ already loaded in your DIM tab.
 | `manifest.json` | MV3 manifest. Loads in both Firefox and Chromium. |
 | `background.js` | Service worker. Fetches the community tier sheet (CORS-free via host permission), parses 870+ weapons into a name → tier + recommended-perks map, caches it in `chrome.storage` (12h TTL). |
 | `content.js` | Runs on the DIM page. Reads your vault from IndexedDB, injects the tier badge, glows recommended perks on the perk circles, and ranks duplicate copies (keep vs shard). |
-| `popup.html` / `popup.js` | Toolbar popup: tier distribution, owned-weapon counts, duplicate/armor search, "Apply to DIM" / "Copy". Holds no data — it asks `content.js`, which has the vault + tier map in memory. |
+| `popup.html` / `popup.js` | Toolbar popup: one composable filter (tiers ∩ dupes) with a live summary and a single "Apply to DIM" / "Copy query". Holds no data — it asks `content.js`, which has the vault + tier map in memory. |
 
 ### Why a content script can read DIM's data
 
@@ -107,20 +107,20 @@ Popup controls:
 Locked copies are still flagged (the badge appends *· unlock first*) rather than hidden.
 **Exclude exotics** drops exotics from the counts, tier search, and duplicate ranking.
 
-### Tier search & armor cleanup (toolbar popup)
+### One filter, one action (toolbar popup)
 
-- **Tier search** — tick any combination of tiers and filter DIM to your owned weapons in
-  them. The header shows a coverage stat (`142/150 on tier list`) you can click to copy
-  unmatched names.
-- **Armor cleanup** — armor has no community tier sheet, so these presets delegate to
-  DIM's own search filters (which stay current with the sandbox):
+Tiers and duplicates are a single composable filter, not two separate searches:
 
-  | Preset | DIM query |
-  | --- | --- |
-  | **Low / legacy tier** | `is:armor -is:exotic -is:locked tier:<=3` |
-  | **Worse-stat dupes** | `is:armor -is:exotic -is:locked dupe:setbonus+statlower` |
-
-  Both surface **candidates to review**, not an auto-shard list.
+- **Tiers** — tick any combination (none = no tier constraint). 
+- **Only weapons with dupes** — a toggle that intersects the tier filter with "has a
+  shardable copy". Empty tiers + dupes-on = all your shardable dupes; A/S + dupes-on = just
+  your A/S weapons that have dupes; F + dupes-off = all your F-tier junk.
+- **Highlight shard picks on tiles** — a live overlay (outlines copies as you toggle); not
+  part of the query.
+- **Shard rules** — *keep complementary rolls* and the *never-shard-if-tagged* tags/note
+  define what counts as shardable; they feed both the filter and the highlight.
+- **Apply to DIM** / **Copy query** — drop the combined `(name:"…" or …)` search into DIM,
+  or copy it. The summary band shows `N weapons match · M shardable` live.
 
 ## Name matching & coverage
 
