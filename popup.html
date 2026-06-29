@@ -98,6 +98,31 @@
       .switch.head:hover { background: var(--card); }
       input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; flex: none; }
 
+      /* ---- Protect skip-list ------------------------------------------- */
+      .protect { background: var(--card); border-radius: 9px; padding: 9px 10px; margin-bottom: 8px; }
+      .protect-head { font-size: 11px; font-weight: 700; letter-spacing: 0.3px; color: var(--text-2); margin-bottom: 7px; }
+      .tagrow { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 9px; }
+      .tagchip {
+        display: inline-flex; align-items: center; gap: 5px;
+        padding: 4px 8px; border-radius: 7px;
+        background: var(--bg); cursor: pointer; user-select: none;
+        font-size: 11px; font-weight: 600;
+        box-shadow: inset 0 0 0 1px transparent;
+        transition: box-shadow 0.12s ease, background-color 0.12s ease;
+      }
+      .tagchip:hover { background: var(--card-hover); }
+      .tagchip:has(input:checked) { background: rgb(232 165 52 / 0.13); box-shadow: inset 0 0 0 1px rgb(232 165 52 / 0.5); }
+      .tagchip input { width: 13px; height: 13px; }
+      .noterow { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-3); }
+      .noterow input {
+        font: inherit; font-size: 12px; color: var(--text);
+        background: var(--bg); border: 1px solid var(--line);
+        border-radius: 7px; padding: 6px 8px; outline: none;
+        transition: border-color 0.12s ease;
+      }
+      .noterow input::placeholder { color: var(--text-3); }
+      .noterow input:focus { border-color: rgb(232 165 52 / 0.6); }
+
       /* ---- Tier rows ---------------------------------------------------- */
       .tiers { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
       .tier {
@@ -224,6 +249,20 @@
           <input type="checkbox" id="keep-coverage" checked />
           <span>Keep complementary rolls<br /><small style="color:var(--text-3)">Spare a copy that's your only source of a recommended perk</small></span>
         </label>
+        <div class="protect">
+          <div class="protect-head">Never shard if tagged</div>
+          <div class="tagrow">
+            <label class="tagchip"><input type="checkbox" class="ptag" value="favorite" checked /><span>★ Favorite</span></label>
+            <label class="tagchip"><input type="checkbox" class="ptag" value="keep" checked /><span>Keep</span></label>
+            <label class="tagchip"><input type="checkbox" class="ptag" value="archive" /><span>Archive</span></label>
+            <label class="tagchip"><input type="checkbox" class="ptag" value="junk" /><span>Junk</span></label>
+            <label class="tagchip"><input type="checkbox" class="ptag" value="infuse" /><span>Infuse</span></label>
+          </div>
+          <label class="noterow">
+            <span>Skip noted items containing</span>
+            <input type="text" id="protect-note" placeholder="e.g. pvp, raid" autocomplete="off" spellcheck="false" />
+          </label>
+        </div>
         <label class="switch" style="margin-bottom: 12px">
           <input type="checkbox" id="redundant" />
           <span>Highlight on tiles</span>

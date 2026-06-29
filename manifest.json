@@ -11,12 +11,12 @@
   },
   "background": {
     "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "scripts": ["naming.js", "background.js"]
   },
   "content_scripts": [
     {
       "matches": ["https://app.destinyitemmanager.com/*", "https://beta.destinyitemmanager.com/*"],
-      "js": ["content.js"],
+      "js": ["naming.js", "keepshard.js", "dimvault.js", "render.js", "content.js"],
       "run_at": "document_idle"
     }
   ],

@@ -15,8 +15,15 @@ const $ = (id) => document.getElementById(id);
 const status = (m) => ($("status").textContent = m);
 const excludeChecked = () => $("exclude").checked;
 const keepCoverageChecked = () => $("keep-coverage").checked;
+const selectedProtectTags = () => [...document.querySelectorAll(".ptag:checked")].map((i) => i.value);
+const protectNoteVal = () => $("protect-note").value.trim();
 // Settings every message carries so the content script recomputes with the current toggles.
-const settings = () => ({ excludeExotics: excludeChecked(), keepCoverage: keepCoverageChecked() });
+const settings = () => ({
+  excludeExotics: excludeChecked(),
+  keepCoverage: keepCoverageChecked(),
+  protectTags: selectedProtectTags(),
+  protectNote: protectNoteVal(),
+});
 
 // Promise wrappers (callback style works in both Firefox and Chromium).
 const getActiveTab = () =>
@@ -175,6 +182,11 @@ async function init() {
   }
   // Reflect the content script's actual toggle state (default on) in the checkbox.
   if (typeof resp.keepCoverage === "boolean") $("keep-coverage").checked = resp.keepCoverage;
+  // Reflect the protect skip-list state (defaults: favorite + keep).
+  if (Array.isArray(resp.protectTags)) {
+    for (const cb of document.querySelectorAll(".ptag")) cb.checked = resp.protectTags.includes(cb.value);
+  }
+  if (typeof resp.protectNote === "string") $("protect-note").value = resp.protectNote;
   applyCounts(resp);
 }
 
@@ -182,6 +194,9 @@ $("apply").addEventListener("click", () => run(true));
 $("copy").addEventListener("click", () => run(false));
 $("exclude").addEventListener("change", refresh);
 $("keep-coverage").addEventListener("change", refresh);
+for (const cb of document.querySelectorAll(".ptag")) cb.addEventListener("change", refresh);
+// 'change' (blur/enter), not 'input' — avoid recomputing the whole vault on every keystroke.
+$("protect-note").addEventListener("change", refresh);
 $("redundant").addEventListener("change", toggleRedundant);
 $("redundant-apply").addEventListener("click", () => runRedundant(true));
 $("redundant-copy").addEventListener("click", () => runRedundant(false));
