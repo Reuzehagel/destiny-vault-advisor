@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Vault Advisor — DIM Tier Badge",
+  "version": "0.1.0",
+  "description": "Live keep/shard advice inside DIM: weapon tier badges, glowing god-roll perks, and duplicate ranking from the community tier sheet.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://docs.google.com/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Vault Advisor — tier search"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://app.destinyitemmanager.com/*", "https://beta.destinyitemmanager.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "vault-advisor-tier-badge@vault-advisor.local",
+      "strict_min_version": "126.0"
+    }
+  }
+}
