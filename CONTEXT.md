@@ -42,10 +42,17 @@ Color encodes **advice** (what to do), on a single axis — when quality and adv
 
 A copy can be **protected** — excluded from keep/shard scoring — so a roll kept for a specific reason (a PvP roll, a build piece) is never advised away. The signal is the user's own **DIM annotations**:
 
-- **Tag** — DIM's per-item tag (`favorite`, `keep`, `archive`, `junk`, `infuse`). The user picks which tags protect; default **`favorite` + `keep`**.
+- **Tag** — DIM's per-item tag (`favorite`, `keep`, `archive`, `junk`, `infuse`). The user picks which tags protect; default **none** — protection is opt-in via the popup.
 - **Note** — DIM's free-text note. The user supplies keyword(s) in "skip noted items containing"; a copy is protected if its note contains one (case-insensitive substring). Empty = notes ignored. No automatic note parsing — notes go both ways (a real cache had `{tag:"junk", notes:"dismantle"}`), so only the user's explicit keyword counts.
 
 **Sourcing & seam.** Tags/notes are cached locally in DIM's `keyval-store` under the `dim-api-profile` key (`.profiles[<membershipId>-d2].tags[<itemInstanceId>] = { id, tag, notes }`) — the same IndexedDB the vault already reads, no new permissions. The **data** is surfaced by the loader (`dimvault.js` → `vault.annotationByInstance`); the **policy** (which tags/notes count as protected) lives in the caller (`content.js`, next to the scoring call), because it's user configuration, not a property of the data.
 
 - **Depth** — how many distinct recommended options across columns a copy can switch between. More depth = more flexibility; used as a tiebreak below column coverage.
 - **god roll** — the perfect copy: every recommended option in both trait columns, plus a recommended barrel and mag.
+
+## Wishlist (the shareable layer)
+
+A **wishlist** is DIM's native list of good rolls: `dimwishlist:item=<weaponHash>&perks=<plugHash>,…` lines that DIM matches (ALL listed perks present) to flag a roll with a thumbs-up, searchable via `is:wishlist` / `wishlistnotes:`. It is the **static** half of the advice — "is this roll good?" — judged per roll, with no knowledge of how many copies you own. The **dynamic** half — keep/shard/coverage across *your* copies — is the engine's, and a wishlist cannot express it. See `docs/adr/0002-sheet-to-dim-wishlist.md`.
+
+- **Generation** is `wishlist.js`: the sheet's recommended perks → wishlist text, pure over two injected lookups (`weaponHashes`, `plugHashes`). It matches on **traits only** (perk1 × perk2 cartesian); barrel/mag are left out so a great roll isn't missed for the wrong barrel. Base + enhanced perk hashes both included. Tier rides in `//notes:`.
+- **Wishlist coverage** — the generator reports weapon/perk names it couldn't resolve to a manifest hash, mirroring how tier **coverage** reports owned weapons not on the sheet. The name→hash join (reissues, craftable vs world copies) is the risky part, so misses are surfaced, never silent.
