@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "vault-advisor",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev"],
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["-y", "http-server", ".", "-p", "5173", "-c-1"],
       "port": 5173
     }
   ]

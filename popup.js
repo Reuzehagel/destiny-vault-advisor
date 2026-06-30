@@ -16,6 +16,23 @@ const COLOR = {
   D: "#d29922", E: "#db6d28", F: "#f85149",
 };
 
+// Hosted wishlists published by scripts/build-wishlist.js (full-roll). Copy a raw URL when the
+// selected scope matches one — it auto-updates daily, so the user subscribes once in DIM instead
+// of re-importing. Any other scope/mode falls back to the locally-generated Download. Keep the
+// tier sets in sync with SCOPES in scripts/build-wishlist.js.
+const RAW_BASE = "https://raw.githubusercontent.com/Reuzehagel/destiny-vault-advisor/main/wishlists/";
+const HOSTED = [
+  { file: "all.txt", tiers: [] },
+  { file: "top.txt", tiers: ["S", "A"] },
+  { file: "S.txt", tiers: ["S"] },
+  { file: "A.txt", tiers: ["A"] },
+  { file: "B.txt", tiers: ["B"] },
+];
+const hostedFile = (tierSet) => {
+  const want = [...tierSet].sort().join(",");
+  return HOSTED.find((h) => [...h.tiers].sort().join(",") === want)?.file ?? null;
+};
+
 const $ = (id) => document.getElementById(id);
 const status = (m) => ($("status").textContent = m || "");
 
@@ -164,6 +181,36 @@ async function wishlist(download) {
   }
 }
 
+// Enable "Copy link" only when the current scope+mode maps to a published full-roll file, and
+// nudge toward it (it auto-updates; Download is a static snapshot).
+function reflectWishlist() {
+  const scopeFile = hostedFile(state.wlTiers); // mode-agnostic
+  const file = state.wlMode === "full" ? scopeFile : null;
+  const btn = $("wl-link");
+  btn.disabled = !file;
+  btn.title = file
+    ? `Copy the auto-updating raw URL (${file})`
+    : "Hosted links cover full-roll scopes only: all, S, A, B, or S+A.";
+  $("wl-cov").textContent = file
+    ? `Hosted ${file} — Copy link to subscribe once in DIM (auto-updates daily).`
+    : scopeFile
+      ? `Switch to Full roll to use the hosted ${scopeFile} link.`
+      : "";
+}
+
+async function copyLink() {
+  const file = state.wlMode === "full" ? hostedFile(state.wlTiers) : null;
+  if (!file) return; // button is disabled in this state
+  const url = RAW_BASE + file;
+  try {
+    await navigator.clipboard.writeText(url);
+    $("wl-cov").textContent = `Copied ${file} link — paste into DIM → Settings → Wish Lists.`;
+  } catch {
+    $("wl-cov").textContent = url;
+    console.log(url);
+  }
+}
+
 // --- init ------------------------------------------------------------------
 async function init() {
   tab = await getActiveTab();
@@ -210,15 +257,19 @@ for (const c of document.querySelectorAll("#wl-tiers .chip")) {
     const g = c.dataset.tier;
     state.wlTiers.has(g) ? state.wlTiers.delete(g) : state.wlTiers.add(g);
     c.classList.toggle("on", state.wlTiers.has(g));
+    reflectWishlist();
   });
 }
 for (const o of document.querySelectorAll("#wl-mode .opt")) {
   o.addEventListener("click", () => {
     state.wlMode = o.dataset.mode;
     for (const x of document.querySelectorAll("#wl-mode .opt")) x.classList.toggle("sel", x === o);
+    reflectWishlist();
   });
 }
+$("wl-link").addEventListener("click", copyLink);
 $("wl-download").addEventListener("click", () => wishlist(true));
 $("wl-copy").addEventListener("click", () => wishlist(false));
 
+reflectWishlist();
 init();

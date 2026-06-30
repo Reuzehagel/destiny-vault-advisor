@@ -112,9 +112,10 @@
       .acts { display: flex; gap: 8px; }
       button { height: 34px; padding: 0 14px; border-radius: 6px; font: inherit; font-weight: 500; cursor: pointer; border: 1px solid transparent; display: inline-flex; align-items: center; justify-content: center; transition: background-color 0.12s ease; }
       .secondary { flex: 1; background: var(--line-2); color: var(--text); border-color: var(--line-3); }
-      .secondary:hover { background: #323237; }
+      .secondary:not(:disabled):hover { background: #323237; }
       .primary { flex: 2; background: var(--accent); color: #18120a; font-weight: 600; }
-      .primary:hover { background: #f0b54a; }
+      .primary:not(:disabled):hover { background: #f0b54a; }
+      button:disabled { opacity: 0.45; cursor: default; }
     </style>
   </head>
   <body>
@@ -215,8 +216,9 @@
 
       <footer>
         <div class="acts">
-          <button class="secondary" id="wl-copy">Copy</button>
-          <button class="primary" id="wl-download">⬇ Download .txt</button>
+          <button class="secondary" id="wl-link" disabled>🔗 Copy link</button>
+          <button class="secondary" id="wl-copy">Copy text</button>
+          <button class="primary" id="wl-download">⬇ Download</button>
         </div>
         <div class="note-lbl" id="wl-cov" style="margin-top: 9px; min-height: 13px"></div>
       </footer>
