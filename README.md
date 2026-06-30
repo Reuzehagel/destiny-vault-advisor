@@ -1,147 +1,51 @@
-# Vault Advisor — DIM Tier Badge
+# Vault Advisor
 
-A browser extension that adds **live keep/shard advice inside DIM** ([Destiny Item
-Manager](https://app.destinyitemmanager.com)). Click a weapon and its community tier
-(S–F) appears on the item popup; the god-roll perks glow gold right on DIM's own perk
-circles; and when you own duplicates, the best copy is outlined green (keep) and the
-rest red (shard).
+A browser extension that adds keep/shard advice and community tier badges inside [DIM](https://app.destinyitemmanager.com).
 
-No OAuth, no Bungie API key, no CSV export/import. The extension reads DIM's own cached
-inventory and manifest straight out of the browser, so the advice follows whatever's
-already loaded in your DIM tab.
+Click a weapon and you get:
 
-## How it works
+- Its community tier (S–F) on the item popup.
+- The recommended god-roll perks glowing on DIM's own perk circles.
+- When you own duplicates, the best copy outlined green (keep), the rest red (shard).
 
-| Piece | Role |
-| --- | --- |
-| `manifest.json` | MV3 manifest. Loads in both Firefox and Chromium. |
-| `background.js` | Service worker. Fetches the community tier sheet (CORS-free via host permission), parses it (via `sheet.js`) into a name → tier + recommended-perks map, caches it in `chrome.storage` (12h TTL). |
-| `sheet.js` | Pure CSV → entries parser for the tier sheet. Shared by `background.js` and the Node wishlist builder so the column-detection rules live in one place. |
-| `content.js` | Runs on the DIM page. Reads your vault from IndexedDB, injects the tier badge, glows recommended perks on the perk circles, and ranks duplicate copies (keep vs shard). |
-| `popup.html` / `popup.js` | Toolbar popup with two tabs: **Advisor** (one composable tiers ∩ dupes filter → DIM search) and **Wishlist** (whole-sheet → a DIM wishlist file). Holds no data — it asks `content.js`. |
-| `wishlist.js` | Pure sheet → DIM-wishlist generator (per-weapon perk resolution). Used by the in-extension export and the hosted build. |
-| `scripts/build-wishlist.js` + `.github/workflows/wishlist.yml` | CI that regenerates the hosted wishlist files (`wishlists/*.txt`) from the sheet + Bungie manifest. See [`wishlists/README.md`](wishlists/README.md). |
+No OAuth, no Bungie API key, no CSV import/export. It reads DIM's own cached inventory and manifest straight from the browser.
 
-### Why a content script can read DIM's data
+## Install
 
-A content script injected into `app.destinyitemmanager.com` runs against the **host
-page's origin**, so it can open DIM's own `keyval-store` IndexedDB — exactly what DIM
-caches, no API needed:
+See [INSTALL.md](INSTALL.md).
 
-| Key | What's in it |
-| --- | --- |
-| `accounts` | Your Bungie accounts (gives `membershipId`) |
-| `profile-{membershipId}` | The full raw Bungie `DestinyProfileResponse` — every item, stat, socket |
-| `d2-manifest-InventoryItem` (+ other tables) | Definitions: hash → name, type, tier, perks |
+## Where tiers come from
 
-(This was first proven by a throwaway read-only spike; the spike has since been removed,
-but the finding is the whole foundation of the extension.)
+The community compendium ([theaegisrelic's sheet](https://docs.google.com/spreadsheets/d/1JM-0SlxVDAi-C6rGVlLxa-J1WGewEeL8Qvq4htWZHhY/edit)), fetched live and cached for 12h. When the sheet updates, badges follow. No code change.
 
-### Where the tiers come from
-
-The community compendium
-([theaegisrelic's sheet](https://docs.google.com/spreadsheets/d/1JM-0SlxVDAi-C6rGVlLxa-J1WGewEeL8Qvq4htWZHhY/edit)),
-fetched live and cached. When the sheet updates, badges follow — no code change.
-
-**Tier is weapon-bound** (a property of the weapon, not your roll) and **relative within
-each weapon category** — an S-tier sniper isn't an S-tier glaive.
-
-## Load it
-
-First, **open DIM, sign in, and let your inventory finish loading** at least once so the
-cache exists. Then side-load the unpacked extension from this repo's root:
-
-- **Firefox:** `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on…* → pick
-  `manifest.json`. Reload DIM. (Temporary add-ons are removed on restart.)
-- **Chromium (Chrome / Edge / Brave / Arc):** `chrome://extensions` → enable *Developer
-  mode* → *Load unpacked* → select this repo's folder. Reload DIM.
-
-Click any weapon. Content-script logs are under `[VA-BADGE]`; the worker's logs are on its
-*Inspect* page (`about:debugging` / `chrome://extensions`). Weapons not on the sheet show
-a muted `–`.
+Tier is a property of the weapon, not your roll, and is relative within each weapon category. An S-tier sniper isn't an S-tier glaive.
 
 ## Features
 
-### Tier badge
+Tier badge — click a weapon, its tier shows in the popup top-right, colored by grade. Rank, category, and sheet notes in the tooltip. Weapons not on the sheet show a muted `–`.
 
-Click a weapon → its tier (S–F) appears in the popup's top-right, colored by grade, with
-rank, category, and the sheet's notes in the tooltip.
+Recommended perks — the perks the sheet recommends glow on DIM's perk circles, in the compact list, the socket grid, and the Armory view. Perk 1 / Perk 2 glow bright, barrel / mag softer. Unrolled perks light up too, so you can see what's worth chasing.
 
-### Recommended perks — the ideal roll, in place
+Keep vs shard — when you own multiple copies, it ranks them against the recommended roll and picks the single best to keep. Ranking goes Perk 1 + Perk 2 first, then barrel/mag, then depth (how many recommended perks the copy can toggle between), then masterwork. Keeper gets a green outline, shard candidates red. It scores selectable perks, not just the socketed one, so a craftable or multi-perk drop that can toggle to a recommended perk gets credit.
 
-The perks the sheet recommends **glow gold on DIM's own perk circles** — in the compact
-list, the expanded socket grid, and the full Armory view. Perk 1 / Perk 2 (god-roll
-perks) glow bright; barrel / mag glow softer. It highlights **every** recommended option,
-including ones you haven't rolled, so an unrolled god-roll perk still lights up as "worth
-chasing".
+Toolbar popup — two tabs. Advisor builds one combined tiers + dupes filter and drops it into DIM's search (or copies it). Wishlist turns the whole sheet into a DIM wishlist file.
 
-DIM's perk circles carry only an icon in the DOM (the name is hover-only), so the
-extension indexes every plug in the manifest by `icon → name` and matches the sheet's
-recommended names to on-screen circles via that icon. Because different plugs can share
-one icon, each icon maps to a *set* of names. The glow is applied via a `data-` attribute
-(not a class) because DIM owns `className` on those SVGs and rewrites it on every
-re-render.
+## How it works
 
-### Duplicates — keep vs shard
+| File | Role |
+| --- | --- |
+| `manifest.json` | MV3 manifest. Loads in Firefox and Chromium. |
+| `background.js` | Service worker. Fetches the tier sheet, parses it (`sheet.js`), caches it in `chrome.storage` (12h TTL). |
+| `sheet.js` | CSV → entries parser for the sheet. Shared by the worker and the Node wishlist builder. |
+| `content.js` | Runs on the DIM page. Reads the vault from IndexedDB, injects badges, glows perks, ranks duplicates. |
+| `popup.html` / `popup.js` | Toolbar popup. Holds no data, asks `content.js`. |
+| `wishlist.js` | Sheet → DIM-wishlist generator. Used by the in-extension export and the hosted build. |
+| `scripts/build-wishlist.js` + `.github/workflows/wishlist.yml` | CI that regenerates the hosted wishlist files. See [`wishlists/README.md`](wishlists/README.md). |
 
-When you own multiple copies of a weapon, the extension ranks them against the sheet's
-recommended roll and picks the single best to keep:
-
-- **Ranking:** recommended Perk 1 + Perk 2 matches dominate, then barrel/mag, then *depth*
-  (how many recommended perks the copy can toggle between), then masterwork.
-- **On tiles:** keeper = green outline, shard candidates = red.
-- **In the popup badge:** a green ring (keep) or red ring (shard), with a tooltip that
-  names the recommended perks involved — e.g. "✓ Keep — best roll: Reconstruction + Chill
-  Clip".
-
-Scoring counts **selectable** perks, not just the socketed one: a multi-perk drop or
-crafted weapon that can *toggle* to a recommended perk is credited with it. Keep/shard
-ranks by **roll**, not power — a low-power copy with the better perks is still the keeper.
-
-Popup controls:
-
-- **Keep complementary rolls** (default on) — also keep an extra copy when it's your only
-  source of a recommended trait perk, instead of sharding it. Turn off for an aggressive
-  single-keeper purge.
-- **Highlight on tiles** — outlines everywhere, without filtering.
-- **Apply to DIM** / **Copy** — drop a `(name:"…" or …)` query into DIM's search box, or
-  copy it.
-
-Locked copies are still flagged (the badge appends *· unlock first*) rather than hidden.
-**Exclude exotics** drops exotics from the counts, tier search, and duplicate ranking.
-
-### One filter, one action (toolbar popup)
-
-Tiers and duplicates are a single composable filter, not two separate searches:
-
-- **Tiers** — tick any combination (none = no tier constraint). 
-- **Only weapons with dupes** — a toggle that intersects the tier filter with "has a
-  shardable copy". Empty tiers + dupes-on = all your shardable dupes; A/S + dupes-on = just
-  your A/S weapons that have dupes; F + dupes-off = all your F-tier junk.
-- **Highlight shard picks on tiles** — a live overlay (outlines copies as you toggle); not
-  part of the query.
-- **Shard rules** — *keep complementary rolls* and the *never-shard-if-tagged* tags/note
-  define what counts as shardable; they feed both the filter and the highlight.
-- **Apply to DIM** / **Copy query** — drop the combined `(name:"…" or …)` search into DIM,
-  or copy it. The summary band shows `N weapons match · M shardable` live.
-
-## Name matching & coverage
-
-Sheet names and in-game names are matched after **normalization** (accent strip,
-curly→straight apostrophes, lowercase, collapsed whitespace), with an alphanumeric-only
-**loose fallback** when the exact key misses. The same `normalizeName()` lives in both
-`background.js` and `content.js` and must stay in sync.
+A content script injected into `app.destinyitemmanager.com` runs against the page's origin, so it can read DIM's own `keyval-store` IndexedDB — accounts, the raw profile, and the manifest tables. No API needed.
 
 ## Known limitations
 
-- The badge identifies the popup's item by the **last clicked `.item` tile** (covers the
-  normal flow). Perk highlighting instead keys off the weapon **name in the title**, so it
-  also works in the Armory view where there's no clicked instance.
-- First load fetches ~21 sheet tabs; afterward it's served from cache.
-- Loose name matching can in rare cases collide two differently-named weapons.
-
-## Roadmap ideas
-
-- A native build/lint setup (the code is hand-written vanilla JS today).
-- Guard the duplicated `normalizeName()` with a shared module or a test.
-- See `dim-issue-draft.md` for a stat-target armor-planner feature pitched upstream to DIM.
+- The badge identifies the popup's item by the last clicked tile. Perk highlighting keys off the weapon name in the title, so it also works in the Armory view.
+- First load fetches ~21 sheet tabs, then it's served from cache.
+- Loose name matching can rarely collide two differently-named weapons.
