@@ -163,10 +163,43 @@
     } finally {
       source.close();
     }
+    lastVaultLoadAt = Date.now();
     console.log(
       TAG,
       `Vault loaded: ${vault.byInstance.size} instances, ${vault.defs.size} defs, ${vault.annotationByInstance.size} tagged.`,
     );
+  }
+
+  // DIM keeps writing fresh inventory to its IndexedDB as you play (new drops, pulls,
+  // dismantles), but our in-memory snapshot is taken once at load — so a weapon acquired
+  // after page load isn't in vault.byInstance and clicking it can't be badged. refreshVault
+  // re-reads DIM's cache and repaints. It's guarded two ways: a single in-flight load is
+  // shared (vaultLoading), and back-to-back reloads are rate-limited (RELOAD_COOLDOWN_MS) so
+  // a genuinely non-instanced item that will always miss can't spin us in a reload loop.
+  let vaultLoading = null;
+  let lastVaultLoadAt = 0;
+  const RELOAD_COOLDOWN_MS = 4000;
+
+  function refreshVault() {
+    if (vaultLoading) return vaultLoading;
+    if (Date.now() - lastVaultLoadAt < RELOAD_COOLDOWN_MS) return Promise.resolve();
+    vaultLoading = loadVault()
+      .then(recomputeAndRepaint)
+      .catch((e) => {
+        console.warn(TAG, "vault reload failed:", e.message || e);
+      })
+      .finally(() => {
+        vaultLoading = null;
+      });
+    return vaultLoading;
+  }
+
+  // The shared tail of every "data changed" path (initial load, vault refresh, tier arrival):
+  // re-score duplicates, then repaint badges and tile highlights from the current vault + tiers.
+  function recomputeAndRepaint() {
+    computeRedundant();
+    scanForPopup();
+    applyHighlights();
   }
 
   // The perks on the held roll — shown in the tooltip as context, NOT used to pick
@@ -382,7 +415,12 @@
     }
     const item = vault.byInstance.get(lastClickedInstanceId);
     if (!item) {
-      console.log(TAG, `No vault data for instance ${lastClickedInstanceId} (non-instanced or stale cache).`);
+      // Likely a weapon acquired since page load (so it's missing from our snapshot) — or a
+      // genuinely non-instanced item. Re-read DIM's cache; the resulting scanForPopup retries
+      // injectInto with fresh data. The cooldown means a real non-instanced miss reloads at
+      // most once, then quietly gives up instead of looping.
+      console.log(TAG, `No vault data for instance ${lastClickedInstanceId} — refreshing from DIM's cache.`);
+      refreshVault();
       return;
     }
     const def = vault.defs.get(item.itemHash);
@@ -415,9 +453,7 @@
           console.log(TAG, `Tier list: ${resp.count} weapons (${resp.cached ? "cached" : "fresh"}, ${resp.fetchedAt}).`);
           // Re-badge anything already open now that we have data.
           document.querySelectorAll(`[${BADGE_ATTR}]`).forEach((n) => n.remove());
-          computeRedundant();
-          scanForPopup();
-          applyHighlights();
+          recomputeAndRepaint();
         } else {
           console.warn(TAG, "tier fetch failed:", resp?.error);
         }
@@ -771,11 +807,7 @@
     requestTiers();
     hydratePrefs()
       .then(loadVault)
-      .then(() => {
-        computeRedundant();
-        scanForPopup();
-        applyHighlights();
-      })
+      .then(recomputeAndRepaint)
       .catch((e) => {
         vault.error = e;
         console.warn(TAG, e.message || e);
