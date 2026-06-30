@@ -9,89 +9,15 @@
  * Source: theaegisrelic's community compendium. Tier is WEAPON-BOUND and is
  * RELATIVE WITHIN each weapon category (an S-tier sniper ≠ an S-tier glaive).
  */
-// Share naming.js with the content scripts so normalizeName is ONE function, not two
-// copies that must be kept in sync by hand. Chrome runs this as a service worker
-// (importScripts available); Firefox loads naming.js ahead of us via the background
-// `scripts` array (manifest), where importScripts doesn't exist — hence the guard.
-if (typeof importScripts === "function") importScripts("naming.js");
-const { normalizeName } = globalThis.VaultAdvisor;
+// Share naming.js + sheet.js with the other contexts so the name keys and the sheet
+// parser are ONE definition each, not copies kept in sync by hand. Chrome runs this as a
+// service worker (importScripts available); Firefox loads them ahead of us via the
+// background `scripts` array (manifest), where importScripts doesn't exist — hence the guard.
+if (typeof importScripts === "function") importScripts("naming.js", "sheet.js");
+const { normalizeName, WEAPON_TABS, tabUrl, buildFromTab } = globalThis.VaultAdvisor;
 
-const SHEET_ID = "1JM-0SlxVDAi-C6rGVlLxa-J1WGewEeL8Qvq4htWZHhY";
-const WEAPON_TABS = [
-  "Autos", "Bows", "HCs", "Pulses", "Scouts", "Sidearms", "SMGs", "BGLs",
-  "Fusions", "Glaives", "Shotguns", "Snipers", "Rocket Sidearms", "Traces",
-  "HGLs", "LFRs", "LMGs", "Rockets", "Swords", "Other", "Exotic Weapons",
-];
 const CACHE_KEY = "tierCache3"; // bumped on shape/content change (barrel/mag; untiered entries)
 const TTL_MS = 12 * 60 * 60 * 1000; // refetch at most twice a day
-
-const tabUrl = (tab) =>
-  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-
-// RFC-4180-ish CSV parser: handles quoted fields with embedded commas/newlines.
-function parseCSV(text) {
-  const rows = [];
-  let row = [], field = "", inQ = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    if (inQ) {
-      if (c === '"') {
-        if (text[i + 1] === '"') { field += '"'; i++; }
-        else inQ = false;
-      } else field += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ",") { row.push(field); field = ""; }
-    else if (c === "\r") { /* skip */ }
-    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
-    else field += c;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  return rows;
-}
-
-const findCol = (headers, pred) => headers.findIndex((h) => pred(h.trim().toLowerCase()));
-
-function buildFromTab(category, csv) {
-  const rows = parseCSV(csv);
-  if (!rows.length) return [];
-  const h = rows[0];
-  const iName = findCol(h, (s) => s === "name");
-  const iTier = findCol(h, (s) => s === "tier");
-  const iRank = findCol(h, (s) => s === "rank");
-  const iNotes = findCol(h, (s) => s.includes("notes"));
-  const iPerk1 = findCol(h, (s) => s.includes("perk 1"));
-  const iPerk2 = findCol(h, (s) => s.includes("perk 2"));
-  const iBarrel = findCol(h, (s) => s.includes("barrel"));
-  // Exact-ish match so a "Damage"/"Image" header can't be mistaken for the magazine
-  // column, while still accepting a "Magazine" header.
-  const iMag = findCol(h, (s) => s === "mag" || s === "magazine");
-  // A tab can list weapons with recommended perks but no Tier column at all (handled
-  // per-row below). Only a missing Name column makes the tab unusable.
-  if (iName < 0) return [];
-
-  const cell = (row, i) => (i >= 0 ? (row[i] || "").trim() : "");
-  const lines = (v) => v.split("\n").map((s) => s.trim()).filter(Boolean);
-
-  const out = [];
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r];
-    const name = cell(row, iName);
-    if (!name) continue;
-    const tier = cell(row, iTier);
-    // recommended perks, used to rank duplicate copies (keep vs shard)
-    const perks = {
-      barrel: lines(cell(row, iBarrel)),
-      mag: lines(cell(row, iMag)),
-      perk1: lines(cell(row, iPerk1)),
-      perk2: lines(cell(row, iPerk2)),
-    };
-    // Keep real entries: some tabs (e.g. "Other") list weapons with recommended
-    // perks but no tier yet — still useful for keep-vs-shard.
-    if (!tier && !perks.perk1.length && !perks.perk2.length) continue;
-    out.push({ name, tier, rank: cell(row, iRank), notes: cell(row, iNotes), category, perks });
-  }
-  return out;
-}
 
 async function fetchAll() {
   const map = {};

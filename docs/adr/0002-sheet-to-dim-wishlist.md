@@ -1,6 +1,6 @@
 # 2. Sheet → DIM wishlist: generate, don't re-highlight
 
-Status: Accepted — 2026-06-29 (both delivery paths chosen; extension export ships first)
+Status: Accepted — 2026-06-29 (both delivery paths built: extension export + hosted `wishlists/*.txt` via `scripts/build-wishlist.js` + GitHub Actions)
 
 ## Context
 

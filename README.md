@@ -15,9 +15,12 @@ already loaded in your DIM tab.
 | Piece | Role |
 | --- | --- |
 | `manifest.json` | MV3 manifest. Loads in both Firefox and Chromium. |
-| `background.js` | Service worker. Fetches the community tier sheet (CORS-free via host permission), parses 870+ weapons into a name → tier + recommended-perks map, caches it in `chrome.storage` (12h TTL). |
+| `background.js` | Service worker. Fetches the community tier sheet (CORS-free via host permission), parses it (via `sheet.js`) into a name → tier + recommended-perks map, caches it in `chrome.storage` (12h TTL). |
+| `sheet.js` | Pure CSV → entries parser for the tier sheet. Shared by `background.js` and the Node wishlist builder so the column-detection rules live in one place. |
 | `content.js` | Runs on the DIM page. Reads your vault from IndexedDB, injects the tier badge, glows recommended perks on the perk circles, and ranks duplicate copies (keep vs shard). |
-| `popup.html` / `popup.js` | Toolbar popup: one composable filter (tiers ∩ dupes) with a live summary and a single "Apply to DIM" / "Copy query". Holds no data — it asks `content.js`, which has the vault + tier map in memory. |
+| `popup.html` / `popup.js` | Toolbar popup with two tabs: **Advisor** (one composable tiers ∩ dupes filter → DIM search) and **Wishlist** (whole-sheet → a DIM wishlist file). Holds no data — it asks `content.js`. |
+| `wishlist.js` | Pure sheet → DIM-wishlist generator (per-weapon perk resolution). Used by the in-extension export and the hosted build. |
+| `scripts/build-wishlist.js` + `.github/workflows/wishlist.yml` | CI that regenerates the hosted wishlist files (`wishlists/*.txt`) from the sheet + Bungie manifest. See [`wishlists/README.md`](wishlists/README.md). |
 
 ### Why a content script can read DIM's data
 
