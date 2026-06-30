@@ -39,12 +39,51 @@ const status = (m) => ($("status").textContent = m || "");
 const state = {
   // advisor
   exclude: false, dupesOnly: false, highlight: false, keepCoverage: true,
-  protectTags: new Set(), protectNote: "",
+  protectTags: new Set(), protectNote: "", tiers: new Set(),
   // wishlist (independent of the advisor scope)
   wlTiers: new Set(), wlMode: "full",
 };
 
-const selectedTiers = () => [...document.querySelectorAll("#tiers input:checked")].map((i) => i.value);
+const selectedTiers = () => [...state.tiers];
+
+// chrome.storage.local is the single source of truth for popup settings, so they survive the
+// popup closing, the DIM tab reloading, and browser restarts. content.js hydrates the same key
+// (mirror any shape change there). Saved on every control change; loaded on init.
+const PREFS_KEY = "vaultAdvisorPrefs";
+
+const storageLocal = () => (typeof chrome !== "undefined" && chrome.storage?.local) || null;
+
+function savePrefs() {
+  storageLocal()?.set({
+    [PREFS_KEY]: {
+      exclude: state.exclude,
+      dupesOnly: state.dupesOnly,
+      highlight: state.highlight,
+      keepCoverage: state.keepCoverage,
+      protectTags: [...state.protectTags],
+      protectNote: state.protectNote,
+      tiers: [...state.tiers],
+      wlTiers: [...state.wlTiers],
+      wlMode: state.wlMode,
+    },
+  });
+}
+
+async function hydratePrefs() {
+  const local = storageLocal();
+  const p = await new Promise((res) =>
+    local ? local.get(PREFS_KEY, (o) => res((o && o[PREFS_KEY]) || {})) : res({}),
+  );
+  if (typeof p.exclude === "boolean") state.exclude = p.exclude;
+  if (typeof p.dupesOnly === "boolean") state.dupesOnly = p.dupesOnly;
+  if (typeof p.highlight === "boolean") state.highlight = p.highlight;
+  if (typeof p.keepCoverage === "boolean") state.keepCoverage = p.keepCoverage;
+  if (Array.isArray(p.protectTags)) state.protectTags = new Set(p.protectTags);
+  if (typeof p.protectNote === "string") state.protectNote = p.protectNote;
+  if (Array.isArray(p.tiers)) state.tiers = new Set(p.tiers);
+  if (Array.isArray(p.wlTiers)) state.wlTiers = new Set(p.wlTiers);
+  if (p.wlMode === "traits" || p.wlMode === "full") state.wlMode = p.wlMode;
+}
 
 // Advisor recompute settings — carried on every advisor message.
 const settings = () => ({
@@ -75,7 +114,6 @@ function setTab(name) {
 
 // --- advisor ---------------------------------------------------------------
 function renderTiers(counts) {
-  const keep = new Set(selectedTiers());
   const wrap = $("tiers");
   wrap.innerHTML = "";
   const max = Math.max(1, ...TIERS.map((g) => counts?.[g] || 0));
@@ -86,11 +124,16 @@ function renderTiers(counts) {
     label.className = "row";
     label.title = `${n} ${g}-tier weapon${n === 1 ? "" : "s"}`;
     label.innerHTML = `
-      <input type="checkbox" value="${g}" ${n ? "" : "disabled"} ${keep.has(g) && n ? "checked" : ""} />
+      <input type="checkbox" value="${g}" ${n ? "" : "disabled"} ${state.tiers.has(g) && n ? "checked" : ""} />
       <span class="grade" style="background:${COLOR[g]}">${g}</span>
       <span class="bar"><i style="width:${pct}%"></i></span>
       <span class="count">${n}</span>`;
-    label.querySelector("input").addEventListener("change", sync);
+    const input = label.querySelector("input");
+    input.addEventListener("change", () => {
+      input.checked ? state.tiers.add(g) : state.tiers.delete(g);
+      savePrefs();
+      sync();
+    });
     wrap.appendChild(label);
   }
 }
@@ -143,6 +186,7 @@ function bindSwitch(id, key) {
   $(id).addEventListener("click", () => {
     state[key] = !state[key];
     setSwitch(id, state[key]);
+    savePrefs();
     sync();
   });
 }
@@ -211,21 +255,27 @@ async function copyLink() {
   }
 }
 
+// Reflect persisted wishlist state onto its chips + mode radio (advisor controls use
+// reflectControls()); then refresh the Copy-link availability.
+function reflectWishlistUI() {
+  for (const c of document.querySelectorAll("#wl-tiers .chip")) c.classList.toggle("on", state.wlTiers.has(c.dataset.tier));
+  for (const o of document.querySelectorAll("#wl-mode .opt")) o.classList.toggle("sel", o.dataset.mode === state.wlMode);
+  reflectWishlist();
+}
+
 // --- init ------------------------------------------------------------------
 async function init() {
+  await hydratePrefs(); // storage is the source of truth — load before touching the UI or the tab
+  reflectControls();
+  reflectWishlistUI();
   tab = await getActiveTab();
+  // Push the loaded settings to the content script (it adopts them) and read back live counts.
   const resp = tab && (await sendToTab(tab.id, { type: "sync", ...settings() }));
   if (!resp) {
     status("Open DIM to use this.");
     renderTiers({});
     return;
   }
-  state.exclude = Boolean(resp.excludeExotics);
-  state.keepCoverage = resp.keepCoverage !== false;
-  state.highlight = Boolean(resp.highlightOn);
-  state.protectTags = new Set(resp.protectTags || []);
-  state.protectNote = resp.protectNote || "";
-  reflectControls();
   renderTiers(resp.counts || {});
   setSummary(resp.weapons, resp.shardable);
   if (!resp.ready) status("Vault still loading in DIM…");
@@ -242,11 +292,12 @@ for (const b of document.querySelectorAll(".badge")) {
     const tag = b.dataset.tag;
     state.protectTags.has(tag) ? state.protectTags.delete(tag) : state.protectTags.add(tag);
     b.classList.toggle("on", state.protectTags.has(tag));
+    savePrefs();
     sync();
   });
 }
 // 'change' (blur/enter), not 'input' — avoid recomputing the whole vault on every keystroke.
-$("protect-note").addEventListener("change", () => { state.protectNote = $("protect-note").value.trim(); sync(); });
+$("protect-note").addEventListener("change", () => { state.protectNote = $("protect-note").value.trim(); savePrefs(); sync(); });
 $("apply").addEventListener("click", () => run(true));
 $("copy").addEventListener("click", () => run(false));
 
@@ -257,6 +308,7 @@ for (const c of document.querySelectorAll("#wl-tiers .chip")) {
     const g = c.dataset.tier;
     state.wlTiers.has(g) ? state.wlTiers.delete(g) : state.wlTiers.add(g);
     c.classList.toggle("on", state.wlTiers.has(g));
+    savePrefs();
     reflectWishlist();
   });
 }
@@ -264,6 +316,7 @@ for (const o of document.querySelectorAll("#wl-mode .opt")) {
   o.addEventListener("click", () => {
     state.wlMode = o.dataset.mode;
     for (const x of document.querySelectorAll("#wl-mode .opt")) x.classList.toggle("sel", x === o);
+    savePrefs();
     reflectWishlist();
   });
 }
@@ -271,5 +324,4 @@ $("wl-link").addEventListener("click", copyLink);
 $("wl-download").addEventListener("click", () => wishlist(true));
 $("wl-copy").addEventListener("click", () => wishlist(false));
 
-reflectWishlist();
 init();

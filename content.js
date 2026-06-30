@@ -728,6 +728,27 @@
     }
   });
 
+  // Hydrate persisted popup settings at page load so highlight / exclude-exotics / protect
+  // choices survive a DIM reload, not just a popup reopen. Mirrors the shape popup.js writes
+  // under PREFS_KEY; the popup still pushes the same fields on every message.
+  function hydratePrefs() {
+    return new Promise((resolve) => {
+      try {
+        chrome.storage.local.get("vaultAdvisorPrefs", (o) => {
+          const p = (o && o.vaultAdvisorPrefs) || {};
+          if (typeof p.exclude === "boolean") excludeExotics = p.exclude;
+          if (typeof p.keepCoverage === "boolean") keepCoverage = p.keepCoverage;
+          if (Array.isArray(p.protectTags)) protectTags = new Set(p.protectTags);
+          if (typeof p.protectNote === "string") protectNote = p.protectNote;
+          if (typeof p.highlight === "boolean") highlightOn = p.highlight;
+          resolve();
+        });
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   // --- Wire up --------------------------------------------------------------
   function start() {
     ensureBadgeStyles();
@@ -748,7 +769,8 @@
     obs.observe(document.body, { childList: true, subtree: true });
 
     requestTiers();
-    loadVault()
+    hydratePrefs()
+      .then(loadVault)
       .then(() => {
         computeRedundant();
         scanForPopup();
