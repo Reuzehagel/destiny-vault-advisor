@@ -101,6 +101,58 @@ test("annotationByInstance surfaces DIM tags and notes, keyed by instanceId", as
   assert.deepEqual(v.annotationByInstance.get(B), { tag: "junk", notes: "dismantle" });
 });
 
+// A minimal armor-set fixture: one armor piece (carries equippingBlock.equipableItemSetHash),
+// one weapon (no set ref), and the EquipableItemSet table its set name lives in. Mirrors the
+// real wiring — set hash on the InventoryItem def, name in a separate manifest table.
+const ARMOR = "inst-armor";
+const WEAPON = "inst-weapon";
+const setFixture = ({ withSetTable = true } = {}) => {
+  const entries = [
+    [
+      "profile-1",
+      {
+        profileInventory: {
+          data: {
+            items: [
+              { itemInstanceId: ARMOR, itemHash: 3000 },
+              { itemInstanceId: WEAPON, itemHash: 1000 },
+            ],
+          },
+        },
+        characterInventories: { data: {} },
+        characterEquipment: { data: {} },
+        itemComponents: {},
+      },
+    ],
+    [
+      "d2-manifest-InventoryItem",
+      {
+        1000: { displayProperties: { name: "Test Rifle" } },
+        3000: { displayProperties: { name: "Spire Helmet" }, equippingBlock: { equipableItemSetHash: 5000 } },
+      },
+    ],
+  ];
+  if (withSetTable) {
+    entries.push(["d2-manifest-EquipableItemSet", { 5000: { displayProperties: { name: "Spire of the Watcher" } } }]);
+  }
+  return entries;
+};
+
+test("setByInstance resolves an armor piece's set hash + name from the EquipableItemSet table", async () => {
+  const v = await loadVault(makeSource(setFixture()));
+  assert.deepEqual(v.setByInstance.get(ARMOR), { setHash: 5000, setName: "Spire of the Watcher" });
+});
+
+test("a setless item (a weapon) is absent from setByInstance", async () => {
+  const v = await loadVault(makeSource(setFixture()));
+  assert.equal(v.setByInstance.has(WEAPON), false);
+});
+
+test("missing EquipableItemSet table degrades gracefully — setHash kept, setName null", async () => {
+  const v = await loadVault(makeSource(setFixture({ withSetTable: false })));
+  assert.deepEqual(v.setByInstance.get(ARMOR), { setHash: 5000, setName: null });
+});
+
 test("no cached profile → throws a user-facing message", async () => {
   await assert.rejects(
     loadVault(makeSource([["d2-manifest-InventoryItem", {}]])),

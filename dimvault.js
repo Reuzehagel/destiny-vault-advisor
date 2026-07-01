@@ -40,6 +40,8 @@
       perkNameByIcon: new Map(),
       /** instanceId -> { tag, notes } — DIM annotations (drives the protect skip-list) */
       annotationByInstance: new Map(),
+      /** instanceId -> { setHash, setName } — armor's set membership (setName may be null) */
+      setByInstance: new Map(),
     };
   }
 
@@ -106,6 +108,32 @@
     for (const h of neededHashes) {
       const def = bigTable[h] ?? bigTable[String(h)];
       if (def) vault.defs.set(h, def);
+    }
+
+    // Armor 3.0 set membership. Every armor piece references its set via the InventoryItem
+    // def's `equippingBlock.equipableItemSetHash` (nested, single-p "equipable" — confirmed
+    // against DIM's own item factory). The set reference is a property of the def, not the
+    // instance, so we resolve it now that defs are loaded. Gather the set hashes, then hydrate
+    // display names from the EquipableItemSet table in one read-once pass — the same pattern as
+    // the big InventoryItem table above. Only armor carries a set ref; weapons/setless items
+    // are simply absent from setByInstance.
+    for (const [id, item] of vault.byInstance) {
+      const setHash = vault.defs.get(item.itemHash)?.equippingBlock?.equipableItemSetHash;
+      if (!setHash) continue; // no set ref (weapon / setless armor) — leave it out
+      vault.setByInstance.set(id, { setHash, setName: null });
+    }
+    if (vault.setByInstance.size) {
+      // Missing/uncached set table degrades gracefully: entries keep their setHash, setName null.
+      const setKey =
+        keys.find((k) => /^d2-manifest-EquipableItemSet$/.test(k)) || keys.find((k) => /EquipableItemSet/.test(k));
+      const setTable = setKey ? await source.get(setKey) : null;
+      if (setTable) {
+        for (const entry of vault.setByInstance.values()) {
+          const setDef = setTable[entry.setHash] ?? setTable[String(entry.setHash)];
+          const name = setDef?.displayProperties?.name;
+          if (name) entry.setName = name;
+        }
+      }
     }
 
     // Index every plug's icon -> name(s) while the big table is in memory. DIM's perk
