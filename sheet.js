@@ -24,6 +24,10 @@
     "HGLs", "LFRs", "LMGs", "Rockets", "Swords", "Other", "Exotic Weapons",
   ];
 
+  // The "Set Bonuses" tab on the SAME sheet — armor set grades, not weapons. Located by
+  // gid because the tab name can be renamed; fetch-by-gid support is issue 02's job.
+  const SET_BONUS_GID = "1665223292";
+
   const tabUrl = (tab) =>
     `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
 
@@ -93,7 +97,57 @@
     return out;
   }
 
-  const api = { SHEET_ID, WEAPON_TABS, tabUrl, parseCSV, buildFromTab };
+  // The Set Bonuses tab → one entry PER SET (not per row). Different column shape from the
+  // weapon tabs (no perk columns; a `Pcs` column), so it's a separate parser, not a reuse
+  // of buildFromTab. Every set is two scattered rows — one Pcs=2, one Pcs=4 — grouped by
+  // exact `Set` text (confirmed to match between a set's two rows). The two rows are
+  // DIFFERENT bonuses with independent grades, so each set carries two.
+  function buildSetBonusesFromTab(csv) {
+    const rows = parseCSV(csv);
+    if (!rows.length) return [];
+    const h = rows[0];
+    const iSet = findCol(h, (s) => s === "set");
+    const iPcs = findCol(h, (s) => s === "pcs");
+    const iBonus = findCol(h, (s) => s === "bonus");
+    const iTier = findCol(h, (s) => s === "tier");
+    const iRank = findCol(h, (s) => s === "rank");
+    const iTrigger = findCol(h, (s) => s === "trigger");
+    const iEffect = findCol(h, (s) => s === "effect");
+    // "ANALYSIS Description" → notes, mirroring the weapon `notes` field.
+    const iNotes = findCol(h, (s) => s.includes("description"));
+    if (iSet < 0) return [];
+
+    const cell = (row, i) => (i >= 0 ? (row[i] || "").trim() : "");
+
+    // Map keyed on the set name preserves first-seen order across scattered rows.
+    const bySet = new Map();
+    for (let r = 1; r < rows.length; r++) {
+      const row = rows[r];
+      const name = cell(row, iSet);
+      if (!name) continue; // no set → nothing to group under
+      const pcs = cell(row, iPcs);
+      // Defensive: the sheet is confirmed 2-or-4 only. Anything else (empty, "3", typo) is
+      // malformed — drop the row rather than crash or guess a slot.
+      const slot = pcs === "2" ? "twoPc" : pcs === "4" ? "fourPc" : null;
+      if (!slot) continue;
+      let entry = bySet.get(name);
+      if (!entry) {
+        entry = { name, category: "Set Bonus", twoPc: null, fourPc: null };
+        bySet.set(name, entry);
+      }
+      entry[slot] = {
+        tier: cell(row, iTier),
+        bonus: cell(row, iBonus),
+        rank: cell(row, iRank),
+        trigger: cell(row, iTrigger),
+        effect: cell(row, iEffect),
+        notes: cell(row, iNotes),
+      };
+    }
+    return [...bySet.values()];
+  }
+
+  const api = { SHEET_ID, WEAPON_TABS, SET_BONUS_GID, tabUrl, parseCSV, buildFromTab, buildSetBonusesFromTab };
   root.VaultAdvisor = Object.assign(root.VaultAdvisor || {}, api);
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);
