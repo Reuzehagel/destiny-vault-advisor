@@ -45,7 +45,90 @@
     return path.slice(path.lastIndexOf("/") + 1);
   };
 
-  const api = { normalizeName, looseName, perkKey, iconBase };
+  // --- Armor set-name matching ----------------------------------------------
+  // The community sheet decorates each armor Set name with its SOURCE — "Exodus Down
+  // Nessus", "TM Custom Spire of the Watcher" — while the manifest gives the CLEAN set
+  // name ("Exodus Down", "Spire of the Watcher"). So the manifest name is a token-boundary
+  // SUBSTRING of the sheet name (manifest ⊂ sheet). Weapon matching (exact normalizeName,
+  // then equal-loose) can't hit here because the sheet string is a SUPERSET of the manifest
+  // string, so set matching gets its own resolver.
+  const setTokens = (s) => normalizeName(s).split(" ").filter(Boolean);
+
+  // Is `needle` a contiguous run of WHOLE tokens inside `haystack`? Token-boundary so a
+  // clean name matches only when all its words appear in order (the sheet prefixes/suffixes
+  // the source, never splices it mid-word) — "oath" won't match "oathkeeper".
+  function tokenSubsequence(needle, haystack) {
+    if (!needle.length || needle.length > haystack.length) return false;
+    outer: for (let i = 0; i + needle.length <= haystack.length; i++) {
+      for (let j = 0; j < needle.length; j++) if (haystack[i + j] !== needle[j]) continue outer;
+      return true;
+    }
+    return false;
+  }
+
+  // Build a resolver from a manifest's clean set name to its sheet entry.
+  //   sheetSets     — the sheet's set map (normalizeName(decorated) -> entry), as
+  //                   background.js keys it; each entry carries { name, twoPc, fourPc }.
+  //   manifestNames — every owned set's clean name (from vault.setByInstance).
+  //   aliases       — the small escape hatch (normalizeName(manifest) ->
+  //                   normalizeName(sheet)) for the handful of names no rule can bridge,
+  //                   supplied by the CALLER as policy (see CONTEXT.md's caller-owns-policy
+  //                   seam) — not baked into this module.
+  //
+  // Each sheet entry is claimed by the LONGEST manifest name that is a token-subsequence of
+  // it, so a short set name ("Iron") can't shadow a longer one ("Iron Will") that shares its
+  // words. Returns { resolve(name) -> entry|null, misses, unmatchedSheet } — misses/​
+  // unmatchedSheet mirror the weapon coverage report so drift is surfaced, never swallowed.
+  function buildSetResolver(sheetSets, manifestNames, aliases) {
+    const sets = sheetSets || {};
+    const alias = aliases || {};
+    const sheetEntries = Object.keys(sets).map((key) => ({ key, entry: sets[key], tokens: setTokens(key) }));
+    const manifest = [...new Set((manifestNames || []).filter(Boolean))];
+
+    const resolved = new Map(); // normalizeName(manifest) -> sheet entry
+    const claimed = new Set(); // sheet keys taken by some manifest name
+
+    for (const name of manifest) {
+      const norm = normalizeName(name);
+      // 1) Explicit alias wins outright — the caller's override for irreducible names.
+      const aliasKey = alias[norm];
+      if (aliasKey && sets[aliasKey]) {
+        resolved.set(norm, sets[aliasKey]);
+        claimed.add(aliasKey);
+        continue;
+      }
+      // 2) Token-subsequence match. Skip any sheet entry a LONGER owned name also fits
+      //    (shadow guard); among what's left, prefer the shortest sheet name — closest to a
+      //    clean, undecorated match.
+      const nameTokens = setTokens(name);
+      let best = null;
+      for (const s of sheetEntries) {
+        if (!tokenSubsequence(nameTokens, s.tokens)) continue;
+        const shadowed = manifest.some((other) => {
+          if (other === name) return false;
+          const ot = setTokens(other);
+          return ot.length > nameTokens.length && tokenSubsequence(ot, s.tokens);
+        });
+        if (shadowed) continue;
+        if (!best || s.tokens.length < best.tokens.length) best = s;
+      }
+      if (best) {
+        resolved.set(norm, best.entry);
+        claimed.add(best.key);
+      }
+    }
+
+    const misses = manifest.filter((n) => !resolved.has(normalizeName(n)));
+    const unmatchedSheet = sheetEntries.filter((s) => !claimed.has(s.key)).map((s) => s.entry.name || s.key);
+
+    return {
+      resolve: (name) => resolved.get(normalizeName(name)) || null,
+      misses,
+      unmatchedSheet,
+    };
+  }
+
+  const api = { normalizeName, looseName, perkKey, iconBase, buildSetResolver };
   root.VaultAdvisor = Object.assign(root.VaultAdvisor || {}, api);
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

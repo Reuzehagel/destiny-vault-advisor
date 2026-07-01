@@ -42,12 +42,27 @@
   let tierMap = {}; // normalized name -> entry
   let tierLoose = {}; // alphanumeric-only name -> entry (fallback when exact misses)
 
+  // Armor set grades live in their own namespace (set-bound, not weapon-bound): the sheet's
+  // Set Bonuses tab, keyed by normalizeName(decorated set name). setResolver bridges an owned
+  // piece's CLEAN manifest set name to this map — the "gating unknown" of issue 05, because
+  // the sheet DECORATES set names with their source ("Exodus Down Nessus") and the manifest
+  // doesn't. Rebuilt whenever either side changes; null until both the sheet and vault arrive.
+  let setTiers = {}; // normalized decorated set name -> { name, twoPc, fourPc }
+  let setResolver = null;
+
+  // The escape hatch the resolver's substring rule can't reach (normalizeName(manifest) ->
+  // normalizeName(decorated sheet name)). Kept HERE next to the consumer, not in the loader
+  // or naming.js: it's user/config data (like protectTags), the same caller-owns-policy seam
+  // CONTEXT.md describes. Empty until the live coverage report (below) turns up an irreducible
+  // name — the token-substring rule covers every case confirmed so far.
+  const SET_ALIASES = {};
+
   // Shared pure modules, attached to globalThis.VaultAdvisor by earlier-loaded content
   // scripts: naming.js (name keys) and render.js (the render DECISIONS — what the badge
   // says, which colour a tile is, which perk circles glow). content.js keeps only the
   // DOM poking that acts on those decisions. TIER_COLOR/UNKNOWN_COLOR (the grade palette)
   // live in render.js too, so the weapon pill and the armor split pill share one source.
-  const { normalizeName, looseName, iconBase } = globalThis.VaultAdvisor || {};
+  const { normalizeName, looseName, iconBase, buildSetResolver } = globalThis.VaultAdvisor || {};
   const { tileKind, badgeClass, verdictLines, recommendedTiers, glowTier, redundantQuery, armorBadge, TILE_COLOR, TIER_COLOR, UNKNOWN_COLOR } =
     globalThis.VaultAdvisor || {};
 
@@ -73,6 +88,41 @@
       category: hit.category,
       perks: hit.perks,
     };
+  }
+
+  // Rebuild the set-name resolver from the current sheet + vault. Needs BOTH the Set Bonuses
+  // map (setTiers, from the background worker) and the owned pieces' set membership (loaded
+  // by dimvault.js into vault.setByInstance) — it's called from both arrival points and
+  // no-ops until each has data. Mirrors the weapon coverage() report: owned sets with no
+  // sheet match, and sheet sets no owned armor uses, go to the console — never swallowed.
+  function rebuildSetResolver() {
+    if (!buildSetResolver) return;
+    // Wait for the Set Bonuses sheet before building/reporting: on the load ordering where the
+    // vault arrives first, an empty setTiers would match nothing and log a misleading all-miss
+    // "coverage" line. Until then setResolver stays null and armor shows the muted "–" — the
+    // correct transient state. requestTiers re-runs this once the sheet lands.
+    if (!Object.keys(setTiers).length) return;
+    const names = [];
+    for (const m of vault.setByInstance.values()) if (m.setName) names.push(m.setName);
+    setResolver = buildSetResolver(setTiers, names, SET_ALIASES);
+    const ownedSets = new Set(names).size;
+    console.log(
+      TAG,
+      `Set coverage: ${ownedSets - setResolver.misses.length}/${ownedSets} owned sets matched.` +
+        (setResolver.misses.length ? ` No sheet grade for: ${setResolver.misses.join(", ")}.` : "") +
+        (setResolver.unmatchedSheet.length ? ` Sheet sets with no owned armor: ${setResolver.unmatchedSheet.join(", ")}.` : ""),
+    );
+  }
+
+  // The split-badge render decision for an owned armor piece, or null if this instance isn't
+  // set armor (weapons and setless items aren't in setByInstance — they fall through to the
+  // weapon badge). A piece in a set the sheet doesn't grade still returns a decision: the
+  // muted "–" pill, exactly like an untiered weapon (armorBadge(null)).
+  function armorDecisionFor(instanceId) {
+    const membership = vault.setByInstance.get(instanceId);
+    if (!membership) return null;
+    const entry = setResolver ? setResolver.resolve(membership.setName) : null;
+    return armorBadge(entry);
   }
 
   // Duplicate-roll verdict, keyed by instanceId. Each entry is the engine's per-copy
@@ -191,8 +241,10 @@
   }
 
   // The shared tail of every "data changed" path (initial load, vault refresh, tier arrival):
-  // re-score duplicates, then repaint badges and tile highlights from the current vault + tiers.
+  // rebuild the armor set-name resolver (vault or sheet may have changed), re-score
+  // duplicates, then repaint badges and tile highlights from the current vault + tiers.
   function recomputeAndRepaint() {
+    rebuildSetResolver();
     computeRedundant();
     scanForPopup();
     applyHighlights();
@@ -457,9 +509,20 @@
     const def = vault.defs.get(item.itemHash);
     if (!def) return;
 
-    const tier = tierFor(item, def);
     const cs = getComputedStyle(header);
     if (cs.position === "static") header.style.position = "relative";
+
+    // Armor is SET-bound, not weapon-bound: a piece with set membership shows its set's two
+    // grades (split pill), not a weapon tier. A split decision draws two solid halves; single
+    // and muted decisions are weapon-shaped pills (no role ring), so they reuse makeBadge.
+    const armor = armorDecisionFor(lastClickedInstanceId);
+    if (armor) {
+      header.appendChild(armor.kind === "split" ? makeSplitBadge(armor) : makeBadge(armor));
+      console.log(TAG, `Badged armor "${def.displayProperties?.name}" -> ${armor.kind === "split" ? armor.halves.map((h) => h.grade).join("/") : armor.grade}`);
+      return;
+    }
+
+    const tier = tierFor(item, def);
     header.appendChild(makeBadge(tier));
     console.log(TAG, `Badged "${def.displayProperties?.name}" -> ${tier.grade}`);
   }
@@ -480,8 +543,9 @@
         }
         if (resp?.ok) {
           tierMap = resp.tiers || {};
+          setTiers = resp.setTiers || {};
           rebuildLooseIndex();
-          console.log(TAG, `Tier list: ${resp.count} weapons (${resp.cached ? "cached" : "fresh"}, ${resp.fetchedAt}).`);
+          console.log(TAG, `Tier list: ${resp.count} weapons, ${resp.setCount || 0} sets (${resp.cached ? "cached" : "fresh"}, ${resp.fetchedAt}).`);
           // Re-badge anything already open now that we have data.
           document.querySelectorAll(`[${BADGE_ATTR}]`).forEach((n) => n.remove());
           recomputeAndRepaint();
