@@ -74,6 +74,19 @@ test("buildSetResolver: longest manifest name wins so a short set can't shadow a
   assert.deepEqual(r.misses, []);
 });
 
+test("buildSetResolver: drops the manifest's trailing 'Set' suffix so newer set names match", () => {
+  // The manifest suffixes some (newer, Armor 3.0) set names with a bare "Set" —
+  // "Iron Panoply Set" — while the sheet uses the clean "Iron Panoply". Observed live.
+  const sheet = sheetMap([
+    setEntry("Iron Panoply Iron Banner", "A", "B"),
+    setEntry("Disaster Corps Crucible", "C", "C"),
+  ]);
+  const r = buildSetResolver(sheet, ["Iron Panoply Set", "Disaster Corps Set"]);
+  assert.equal(r.resolve("Iron Panoply Set").twoPc.tier, "A");
+  assert.equal(r.resolve("Disaster Corps Set").fourPc.tier, "C");
+  assert.deepEqual(r.misses, []);
+});
+
 test("buildSetResolver: token-boundary match, not raw substring", () => {
   // "oath" is a whole token in the sheet name, not a slice of "oathkeeper".
   const sheet = sheetMap([setEntry("Oathkeeper's Vow Trials", "B", "B")]);

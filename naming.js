@@ -54,6 +54,17 @@
   // string, so set matching gets its own resolver.
   const setTokens = (s) => normalizeName(s).split(" ").filter(Boolean);
 
+  // Manifest match-tokens: the sheet uses the clean set name ("Iron Panoply") but the
+  // manifest suffixes some (newer, Armor 3.0) set defs with a bare "Set" ("Iron Panoply
+  // Set"). Drop a trailing "set" token so the clean name still matches — guarded so a set
+  // literally named just "Set" doesn't reduce to nothing. Manifest-side only; sheet names
+  // never carry the suffix.
+  const manifestTokens = (s) => {
+    const t = setTokens(s);
+    if (t.length > 1 && t[t.length - 1] === "set") t.pop();
+    return t;
+  };
+
   // Is `needle` a contiguous run of WHOLE tokens inside `haystack`? Token-boundary so a
   // clean name matches only when all its words appear in order (the sheet prefixes/suffixes
   // the source, never splices it mid-word) — "oath" won't match "oathkeeper".
@@ -100,13 +111,13 @@
       // 2) Token-subsequence match. Skip any sheet entry a LONGER owned name also fits
       //    (shadow guard); among what's left, prefer the shortest sheet name — closest to a
       //    clean, undecorated match.
-      const nameTokens = setTokens(name);
+      const nameTokens = manifestTokens(name);
       let best = null;
       for (const s of sheetEntries) {
         if (!tokenSubsequence(nameTokens, s.tokens)) continue;
         const shadowed = manifest.some((other) => {
           if (other === name) return false;
-          const ot = setTokens(other);
+          const ot = manifestTokens(other);
           return ot.length > nameTokens.length && tokenSubsequence(ot, s.tokens);
         });
         if (shadowed) continue;
