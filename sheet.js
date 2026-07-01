@@ -28,8 +28,15 @@
   // gid because the tab name can be renamed; fetch-by-gid support is issue 02's job.
   const SET_BONUS_GID = "1665223292";
 
-  const tabUrl = (tab) =>
-    `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
+  // Weapon tabs are fetched by sheet NAME; the Set Bonuses tab is fetched by gid because
+  // its name can be renamed (see SET_BONUS_GID). Pass a string for name, `{ gid }` for gid.
+  const tabUrl = (tab) => {
+    const base = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv`;
+    const gid = tab && typeof tab === "object" ? tab.gid : null;
+    return gid != null
+      ? `${base}&gid=${encodeURIComponent(gid)}`
+      : `${base}&sheet=${encodeURIComponent(tab)}`;
+  };
 
   // RFC-4180-ish CSV parser: handles quoted fields with embedded commas/newlines.
   function parseCSV(text) {

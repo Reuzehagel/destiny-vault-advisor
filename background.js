@@ -14,16 +14,22 @@
 // service worker (importScripts available); Firefox loads them ahead of us via the
 // background `scripts` array (manifest), where importScripts doesn't exist — hence the guard.
 if (typeof importScripts === "function") importScripts("naming.js", "sheet.js");
-const { normalizeName, WEAPON_TABS, tabUrl, buildFromTab } = globalThis.VaultAdvisor;
+const { normalizeName, WEAPON_TABS, SET_BONUS_GID, tabUrl, buildFromTab, buildSetBonusesFromTab } =
+  globalThis.VaultAdvisor;
 
-const CACHE_KEY = "tierCache3"; // bumped on shape/content change (barrel/mag; untiered entries)
+const CACHE_KEY = "tierCache4"; // bumped on shape/content change (added setTiers map)
 const TTL_MS = 12 * 60 * 60 * 1000; // refetch at most twice a day
+
+// perTab key for the Set Bonuses tab. It's fetched by gid (its name can be renamed), so it
+// has no WEAPON_TABS entry to reuse — a fixed label keeps the count visible alongside them.
+const SET_BONUS_LABEL = "Set Bonuses";
 
 async function fetchAll() {
   const map = {};
+  const setMap = {};
   const perTab = {};
-  await Promise.all(
-    WEAPON_TABS.map(async (tab) => {
+  await Promise.all([
+    ...WEAPON_TABS.map(async (tab) => {
       try {
         const res = await fetch(tabUrl(tab), { credentials: "omit" });
         if (!res.ok) throw new Error("HTTP " + res.status);
@@ -34,8 +40,22 @@ async function fetchAll() {
         perTab[tab] = "ERR " + (e && e.message ? e.message : e);
       }
     }),
-  );
-  return { map, perTab };
+    // Set names live in a DIFFERENT namespace from weapon names and could collide with one,
+    // so they go in their own map — last-write-wins across the two would silently corrupt
+    // whichever lost. Fetched by gid, parsed by the set-bonus parser (different columns).
+    (async () => {
+      try {
+        const res = await fetch(tabUrl({ gid: SET_BONUS_GID }), { credentials: "omit" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const entries = buildSetBonusesFromTab(await res.text());
+        perTab[SET_BONUS_LABEL] = entries.length;
+        for (const e of entries) setMap[normalizeName(e.name)] = e; // last wins on dup names
+      } catch (e) {
+        perTab[SET_BONUS_LABEL] = "ERR " + (e && e.message ? e.message : e);
+      }
+    })(),
+  ]);
+  return { map, setMap, perTab };
 }
 
 async function getTiers(force) {
@@ -46,24 +66,31 @@ async function getTiers(force) {
     return ok(stored, true);
   }
 
-  const { map, perTab } = await fetchAll();
+  const { map, setMap, perTab } = await fetchAll();
   if (!Object.keys(map).length) {
     // Network hiccup — serve stale cache if we have any.
     if (stored?.tiers) return { ...ok(stored, true), stale: true };
     return { ok: false, error: "fetch returned no rows" };
   }
-  const fresh = { ts: now, tiers: map, perTab };
+  // The set-bonus tab is a single tab: if only it hiccuped while the weapon tabs succeeded,
+  // keep the last-known set grades rather than clobbering them with an empty map (its ERR
+  // still shows in perTab). Same stale-on-failure intent as the weapon map above.
+  const setTiers = Object.keys(setMap).length ? setMap : stored?.setTiers || {};
+  const fresh = { ts: now, tiers: map, setTiers, perTab };
   await chrome.storage.local.set({ [CACHE_KEY]: fresh });
   return ok(fresh, false);
 }
 
 function ok(entry, cached) {
+  const setTiers = entry.setTiers || {};
   return {
     ok: true,
     cached,
     tiers: entry.tiers,
+    setTiers,
     perTab: entry.perTab,
     count: Object.keys(entry.tiers).length,
+    setCount: Object.keys(setTiers).length,
     fetchedAt: new Date(entry.ts).toISOString(),
   };
 }

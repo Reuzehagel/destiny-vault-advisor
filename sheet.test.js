@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { parseCSV, buildFromTab, buildSetBonusesFromTab } = require("./sheet.js");
+const { parseCSV, buildFromTab, buildSetBonusesFromTab, tabUrl, SET_BONUS_GID } = require("./sheet.js");
 
 // --- parseCSV --------------------------------------------------------------
 
@@ -129,4 +129,24 @@ test("buildSetBonusesFromTab does not throw on empty or odd Pcs", () => {
 
 test("buildSetBonusesFromTab returns [] when there is no Set column", () => {
   assert.deepEqual(buildSetBonusesFromTab("Foo,Bar\n1,2"), []);
+});
+
+// --- tabUrl ----------------------------------------------------------------
+
+test("tabUrl fetches a weapon tab by sheet name", () => {
+  const url = tabUrl("Rocket Sidearms");
+  assert.match(url, /[?&]sheet=Rocket%20Sidearms(&|$)/);
+  assert.equal(url.includes("gid="), false);
+});
+
+test("tabUrl fetches by gid when given { gid } — for tabs located by gid, not name", () => {
+  const url = tabUrl({ gid: SET_BONUS_GID });
+  assert.match(url, new RegExp(`[?&]gid=${SET_BONUS_GID}(&|$)`));
+  assert.equal(url.includes("sheet="), false);
+});
+
+test("tabUrl emits the gviz out:csv endpoint in both forms", () => {
+  for (const arg of ["Autos", { gid: SET_BONUS_GID }]) {
+    assert.match(tabUrl(arg), /\/gviz\/tq\?tqx=out:csv/);
+  }
 });
