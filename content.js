@@ -41,18 +41,14 @@
   // ---------------------------------------------------------------------------
   let tierMap = {}; // normalized name -> entry
   let tierLoose = {}; // alphanumeric-only name -> entry (fallback when exact misses)
-  const TIER_COLOR = {
-    S: "#f5b942", A: "#3fb950", B: "#58a6ff", C: "#d2a8ff",
-    D: "#d29922", E: "#db6d28", F: "#f85149",
-  };
-  const UNKNOWN_COLOR = "#6e7681";
 
   // Shared pure modules, attached to globalThis.VaultAdvisor by earlier-loaded content
   // scripts: naming.js (name keys) and render.js (the render DECISIONS — what the badge
   // says, which colour a tile is, which perk circles glow). content.js keeps only the
-  // DOM poking that acts on those decisions.
+  // DOM poking that acts on those decisions. TIER_COLOR/UNKNOWN_COLOR (the grade palette)
+  // live in render.js too, so the weapon pill and the armor split pill share one source.
   const { normalizeName, looseName, iconBase } = globalThis.VaultAdvisor || {};
-  const { tileKind, badgeClass, verdictLines, recommendedTiers, glowTier, redundantQuery, TILE_COLOR } =
+  const { tileKind, badgeClass, verdictLines, recommendedTiers, glowTier, redundantQuery, armorBadge, TILE_COLOR, TIER_COLOR, UNKNOWN_COLOR } =
     globalThis.VaultAdvisor || {};
 
   function rebuildLooseIndex() {
@@ -368,6 +364,21 @@
           0 0 0 2px #8b949e,
           0 2px 8px rgba(0, 0, 0, 0.3);
       }
+      /* Armor set-bonus split pill — one badge, two solid halves (2pc left, 4pc right),
+         each its own grade colour. Same 24px height / 6px radius / typography as a weapon
+         pill; the halves paint edge-to-edge and the pill's radius clips their corners, so
+         it reads as one badge with a seam. Equal grades just look like a seamed solid pill.
+         No role ring — keep/shard is weapon-only. */
+      .va-badge.va-split {
+        padding: 0;
+        overflow: hidden;
+      }
+      .va-badge.va-split .va-badge-half {
+        align-self: stretch;
+        box-sizing: border-box;
+        min-width: 21px; padding: 0 6px;
+        display: flex; align-items: center; justify-content: center;
+      }
       @keyframes va-badge-pop {
         from { opacity: 0; transform: scale(0.85); }
         to { opacity: 1; transform: scale(1); }
@@ -398,6 +409,26 @@
     el.title = tier.reasons.join("\n");
     el.textContent = tier.grade;
     el.style.background = tier.color;
+    return el;
+  }
+
+  // The armor split pill: one .va-badge, two solid halves the render decision chose
+  // (render.armorBadge → { kind: "split", halves, reasons }). Single-grade and muted
+  // armor decisions carry { grade, color, reasons } and reuse makeBadge instead — they're
+  // just a weapon-shaped pill with no role ring. Wiring an armor piece to its set is
+  // issue 05; this only draws the decision.
+  function makeSplitBadge(decision) {
+    const el = document.createElement("div");
+    el.setAttribute(BADGE_ATTR, "1");
+    el.className = "va-badge va-split";
+    el.title = decision.reasons.join("\n");
+    for (const h of decision.halves) {
+      const half = document.createElement("span");
+      half.className = "va-badge-half";
+      half.textContent = h.grade;
+      half.style.background = h.color;
+      el.appendChild(half);
+    }
     return el;
   }
 

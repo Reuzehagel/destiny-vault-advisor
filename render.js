@@ -24,6 +24,16 @@
   // purple god roll; coverage is yellow (your call); shard is red. protected → no tile.
   const TILE_COLOR = { keep: "#3fb950", godroll: "#c264fe", coverage: "#f5d442", shard: "#f85149" };
 
+  // Tier-letter grade palette (S→F), the badge FILL colour — shared by the weapon pill
+  // and the armor split pill so neither invents its own colours. UNKNOWN_COLOR is the
+  // muted grey for a grade that isn't on the sheet (the "–" pill). content.js imports
+  // both rather than keeping a second copy.
+  const TIER_COLOR = {
+    S: "#f5b942", A: "#3fb950", B: "#58a6ff", C: "#d2a8ff",
+    D: "#d29922", E: "#db6d28", F: "#f85149",
+  };
+  const UNKNOWN_COLOR = "#6e7681";
+
   // Verdict role → the kind of tile outline to draw, or null for "leave it alone"
   // (protected copies, and anything with no actionable verdict).
   const tileKind = (vd) =>
@@ -117,12 +127,46 @@
     return kind;
   }
 
+  // --- Armor set-bonus split badge ------------------------------------------
+  // Armor grades are SET-bound: a set carries two independent bonuses (a 2-piece and a
+  // 4-piece), each with its own tier letter. The badge is one pill with two solid halves
+  // — 2pc left, 4pc right — reusing the weapon pill's TIER_COLOR palette and footprint.
+  // No keep/shard role ring: that's weapon-only (see badgeClass).
+
+  // One tooltip line for a set bonus: "2pc · <bonus> (<grade>) — <trigger/effect>".
+  // Trigger/effect/notes come from the sheet (issue 05's lookup); degrade when blank.
+  const bonusLine = (h) =>
+    `${h.pcs}pc · ${h.bonus || "Set bonus"} (${h.grade})${h.detail ? ` — ${h.detail}` : ""}`;
+
+  // A set's two bonus grades → the split-pill render decision. `set` is the looked-up
+  // Set Bonuses entry (issue 05): { twoPc, fourPc }, each { tier, bonus, trigger, effect,
+  // notes } or null. A slot is "graded" only when its tier is a real letter in TIER_COLOR;
+  // a present-but-untiered slot counts as absent. Three shapes, mirroring the weapon pill:
+  //   both graded -> { kind: "split",  halves: [2pc, 4pc] } — two solid halves
+  //   one graded  -> { kind: "single", grade, color }       — the existing single pill
+  //   neither     -> { kind: "muted",  grade: "–", color }  — same as an untiered weapon
+  function armorBadge(set) {
+    const half = (raw, pcs) => {
+      const color = raw && TIER_COLOR[raw.tier];
+      if (!color) return null;
+      return { pcs, grade: raw.tier, color, bonus: raw.bonus || "", detail: raw.effect || raw.trigger || raw.notes || "" };
+    };
+    const two = half(set && set.twoPc, 2);
+    const four = half(set && set.fourPc, 4);
+    const reasons = [two, four].filter(Boolean).map(bonusLine);
+
+    if (two && four) return { kind: "split", halves: [two, four], reasons };
+    const only = two || four;
+    if (only) return { kind: "single", grade: only.grade, color: only.color, reasons };
+    return { kind: "muted", grade: "–", color: UNKNOWN_COLOR, reasons: ["Set not on the tier sheet."] };
+  }
+
   // The DIM search OR-ing weapon names together, for "filter to weapons with a shardable
   // copy". Pure over the name list; the caller collects which names from verdictById.
   const redundantQuery = (names) =>
     names && names.length ? "(" + names.map((n) => `name:"${n.replace(/"/g, "")}"`).join(" or ") + ")" : "";
 
-  const api = { TILE_COLOR, tileKind, badgeClass, verdictLines, recommendedTiers, glowTier, redundantQuery };
+  const api = { TILE_COLOR, TIER_COLOR, UNKNOWN_COLOR, tileKind, badgeClass, verdictLines, recommendedTiers, glowTier, redundantQuery, armorBadge };
   root.VaultAdvisor = Object.assign(root.VaultAdvisor || {}, api);
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof globalThis !== "undefined" ? globalThis : this);

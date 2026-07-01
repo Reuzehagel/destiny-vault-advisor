@@ -1,7 +1,7 @@
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
-const { tileKind, badgeClass, verdictLines, recommendedTiers, glowTier, redundantQuery } = require("./render.js");
+const { tileKind, badgeClass, verdictLines, recommendedTiers, glowTier, redundantQuery, armorBadge, TIER_COLOR } = require("./render.js");
 
 // --- tileKind --------------------------------------------------------------
 
@@ -91,6 +91,57 @@ test("glowTier: primary beats secondary; null when nothing matches or no names",
   assert.equal(glowTier(new Set(["accurized rounds"]), tiers), "secondary");
   assert.equal(glowTier(new Set(["random perk"]), tiers), null);
   assert.equal(glowTier(null, tiers), null);
+});
+
+// --- armorBadge (split pill) -----------------------------------------------
+
+// A Set Bonuses entry (issue 01 shape): each slot { tier, bonus, trigger, effect, notes }.
+const slot = (tier, bonus, extra) => Object.assign({ tier, bonus, trigger: "", effect: "", notes: "" }, extra);
+
+test("armorBadge: two grades → split pill, 2pc left / 4pc right, each half its TIER_COLOR", () => {
+  const d = armorBadge({ twoPc: slot("B", "Old Martian Diplomacy"), fourPc: slot("S", "Spire of the Watcher") });
+  assert.equal(d.kind, "split");
+  assert.equal(d.halves.length, 2);
+  assert.deepEqual(
+    d.halves.map((h) => [h.pcs, h.grade, h.color]),
+    [[2, "B", TIER_COLOR.B], [4, "S", TIER_COLOR.S]],
+  );
+});
+
+test("armorBadge: equal grades render as a split pill too (no special-case)", () => {
+  const d = armorBadge({ twoPc: slot("S", "A"), fourPc: slot("S", "B") });
+  assert.equal(d.kind, "split");
+  assert.deepEqual(d.halves.map((h) => h.color), [TIER_COLOR.S, TIER_COLOR.S]);
+});
+
+test("armorBadge: only one graded slot → single-grade fallback for that grade", () => {
+  const only4 = armorBadge({ twoPc: null, fourPc: slot("A", "Whatever") });
+  assert.equal(only4.kind, "single");
+  assert.equal(only4.grade, "A");
+  assert.equal(only4.color, TIER_COLOR.A);
+
+  // A present-but-untiered slot (blank/unknown tier) counts as absent → the other stands alone.
+  const only2 = armorBadge({ twoPc: slot("C", "Two"), fourPc: slot("", "Four") });
+  assert.equal(only2.kind, "single");
+  assert.equal(only2.grade, "C");
+});
+
+test("armorBadge: no graded slots / set not on sheet → muted – pill", () => {
+  assert.equal(armorBadge(null).kind, "muted");
+  assert.equal(armorBadge(null).grade, "–");
+  assert.equal(armorBadge({ twoPc: null, fourPc: null }).kind, "muted");
+  assert.equal(armorBadge({ twoPc: slot("Z", "bad"), fourPc: slot("", "") }).kind, "muted");
+});
+
+test("armorBadge: tooltip reasons stack both bonuses with grade + effect", () => {
+  const d = armorBadge({
+    twoPc: slot("B", "Old Martian Diplomacy", { trigger: "on kill" }),
+    fourPc: slot("S", "Spire of the Watcher", { effect: "chain lightning" }),
+  });
+  assert.deepEqual(d.reasons, [
+    "2pc · Old Martian Diplomacy (B) — on kill",
+    "4pc · Spire of the Watcher (S) — chain lightning",
+  ]);
 });
 
 // --- redundantQuery --------------------------------------------------------
